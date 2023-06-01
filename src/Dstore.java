@@ -18,6 +18,16 @@ public class Dstore {
             } catch (Exception c) {
                 System.err.println("error" + c);
             }
+            while(true) {
+                try {
+                    Socket client = port.accept();
+                    BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                    String line;
+                    while((line = in.readLine()) != null) System.out.println(line+" received");
+                    client.close();
+                } catch(Exception e) { System.err.println("error: " + e); }
+            }
+
 
         } catch (Exception e) {
             System.err.println("Issues with Dstore setup" + e);
