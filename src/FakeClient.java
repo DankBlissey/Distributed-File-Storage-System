@@ -21,13 +21,12 @@ public class FakeClient {
             System.out.println("Requesting to store file");
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             String reply;
-            while((reply = in.readLine()) != null) {
+            reply = in.readLine();
                 if(reply.equals("ACK")) {
                     System.out.println("Request acceptance received, sending file data");
                     socket.getOutputStream().write(fileBytes);
                     System.out.println("Data Sent");
                 }
-            }
 
         } catch(Exception e) { System.err.println("error: " + e);
         } finally {

@@ -45,7 +45,7 @@ public class Dstore {
             }
 
             fileOutputStream.close();
-            client.close();
+            //client.close();
 
             System.out.println("File recieved and saved to: " + fileFolderTxt);
         } catch (Exception e) {
@@ -57,12 +57,13 @@ public class Dstore {
         try {
             BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
             String line;
-            while((line = in.readLine()) != null) {
+            line = in.readLine();
                 String[] lines = line.split(" ");
                 if(Objects.equals(lines[0], "STORE") && lines.length == 3) {
                     System.out.println("Storage request recieved:");
                     PrintWriter out = new PrintWriter(client.getOutputStream(), true);
                     out.println("ACK");
+                    /*
                     Timer timer = new Timer();
                     timer.schedule(new TimerTask() {
                         @Override
@@ -79,9 +80,10 @@ public class Dstore {
                         }
                     }, timeout);
                     timer.cancel();
+
+                     */
                     StoreFile(client, fileFolderTxt, lines[1]);
                 }
-            }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
         }
