@@ -24,6 +24,7 @@ public class FakeClient {
             reply = in.readLine();
                 if(reply.equals("ACK")) {
                     System.out.println("Request acceptance received, sending file data");
+                    Thread.sleep(2000);
                     socket.getOutputStream().write(fileBytes);
                     System.out.println("Data Sent");
                 }

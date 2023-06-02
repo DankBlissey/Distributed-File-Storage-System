@@ -63,26 +63,13 @@ public class Dstore {
                     System.out.println("Storage request recieved:");
                     PrintWriter out = new PrintWriter(client.getOutputStream(), true);
                     out.println("ACK");
-                    /*
-                    Timer timer = new Timer();
-                    timer.schedule(new TimerTask() {
-                        @Override
-                        public void run() {
-                            // Timeout occurred, handle it
-                            System.out.println("Timeout occurred. Closing connection.");
-                            try {
-                                in.close();
-                                out.close();
-                                client.close();
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
-                        }
-                    }, timeout);
-                    timer.cancel();
-
-                     */
-                    StoreFile(client, fileFolderTxt, lines[1]);
+                    client.setSoTimeout(timeout);
+                    try {
+                        StoreFile(client, fileFolderTxt, lines[1]);
+                    } catch (Exception e) {
+                        System.err.println("Timeout occurred. Closing connection");
+                        client.close();
+                    }
                 }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
