@@ -20,15 +20,17 @@ public class Dstore {
         } catch (Exception e) {
             System.err.println("Issues with Dstore setup: " + e);
         }
-
-        try {
-            assert port != null : "Connection is null:";
-            client = port.accept();
-            System.out.println("Client connected:");
-        } catch (Exception e) {
-            System.err.println("Socket Accept failed: ");
+        while(true) {
+            try {
+                assert port != null : "Connection is null:";
+                client = port.accept();
+                System.out.println("Client connected:");
+            } catch (Exception e) {
+                System.err.println("Socket Accept failed: ");
+            }
+            ReceiveRequest(client);
         }
-        ReceiveRequest(client);
+
     }
 
     public static void StoreFile(Socket client, String fileFolderTxt, String fileName) {
