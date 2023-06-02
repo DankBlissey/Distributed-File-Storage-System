@@ -11,26 +11,27 @@ public class Dstore {
     static Integer timeout = null;
     static String fileFolderTxt = null;
     static Socket client = null;
+
     public static void main (String [] args) {
         try {
             port = new ServerSocket(Integer.parseInt(args[0]));
             cport = new ServerSocket(Integer.parseInt(args[1]));
             timeout = Integer.parseInt(args[2]);
             fileFolderTxt = args[3];
+
+            while(true) {
+                try {
+                    assert port != null : "Connection is null:";
+                    client = port.accept();
+                    System.out.println("Client connected:");
+                } catch (Exception e) {
+                    System.err.println("Socket Accept failed: ");
+                }
+                ReceiveRequest(client);
+            }
         } catch (Exception e) {
             System.err.println("Issues with Dstore setup: " + e);
         }
-        while(true) {
-            try {
-                assert port != null : "Connection is null:";
-                client = port.accept();
-                System.out.println("Client connected:");
-            } catch (Exception e) {
-                System.err.println("Socket Accept failed: ");
-            }
-            ReceiveRequest(client);
-        }
-
     }
 
     public static void StoreFile(Socket client, String fileFolderTxt, String fileName) {
