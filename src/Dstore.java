@@ -5,6 +5,9 @@ import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 
+/**
+ * Dstore class for storing files sent by client
+ */
 public class Dstore {
     static ServerSocket port = null;
     static ServerSocket cport = null;
@@ -12,12 +15,20 @@ public class Dstore {
     static String fileFolderTxt = null;
     static Socket client = null;
 
+    /**
+     * Main method for running Dstore
+     * @param args arguments given in command line, port is the main port for the client-Dstore connections. Cport is for the Dstore
+     *             and the controller to connect by. Timeout is in milliseconds how long the Dstore will wait for a reply before cancelling
+     *             the request. FileFolderTxt is the pathname of the storage location.
+     */
     public static void main (String [] args) {
         try {
             port = new ServerSocket(Integer.parseInt(args[0]));
             cport = new ServerSocket(Integer.parseInt(args[1]));
             timeout = Integer.parseInt(args[2]);
             fileFolderTxt = args[3];
+
+            deleteFilesInFolder(fileFolderTxt);
 
             while(true) {
                 try {
@@ -34,6 +45,12 @@ public class Dstore {
         }
     }
 
+    /**
+     * Receives file data through a socket and saves it to the storage location
+     * @param client the socket connection to the client
+     * @param fileFolderTxt string of the storage location path
+     * @param fileName name to save the file as
+     */
     public static void StoreFile(Socket client, String fileFolderTxt, String fileName) {
         try {
             System.out.println("Client Connected: " + client.getInetAddress().getHostAddress());
@@ -56,6 +73,11 @@ public class Dstore {
         }
     }
 
+    /**
+     * Waits for a STORE request through the socket, replies to confirm the requst has been recieved, and then runs
+     * "storeFile" function. Times out if the file data is not sent within the specified timeout time.
+     * @param client socket that receives the message
+     */
     public static void ReceiveRequest(Socket client) {
         try {
             BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
@@ -76,6 +98,27 @@ public class Dstore {
                 }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
+        }
+    }
+
+    /**
+     * Deletes all the files in a given folder directory
+     * @param folderPath string of the folder directory to have its content deleted
+     */
+    public static void deleteFilesInFolder(String folderPath) {
+        File folder = new File(folderPath);
+        if (folder.exists() && folder.isDirectory()) {
+            File[] files = folder.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    if (file.isFile()) {
+                        System.out.println("File deleted " + file.delete());
+                    }
+                }
+            }
+            System.out.println("Dstore folder emptied");
+        } else {
+            System.out.println("Invalid folder path!");
         }
     }
 
