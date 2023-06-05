@@ -32,8 +32,10 @@ public class Dstore {
 
             deleteFilesInFolder(fileFolderTxt);
 
-            //InetAddress address = InetAddress.getLocalHost();
-            //Socket cSocket = new Socket(address, cport);
+            InetAddress address = InetAddress.getLocalHost();
+            Socket cSocket = new Socket(address, cport);
+            PrintWriter out = new PrintWriter(cSocket.getOutputStream(), true);
+            out.println("JOIN " + args[0]);
 
             while(true) {
                 try {
@@ -132,6 +134,11 @@ public class Dstore {
         }
     }
 
+    /**
+     * Takes a filename, finds that file within the Dstore storage location, and then outputs its content to the client
+     * @param client socket for the client connection
+     * @param fileName name of the file they want to retrieve
+     */
     public static void loadFile(Socket client, String fileName) {
         String path = fileFolderTxt + fileName;
         try {
@@ -144,15 +151,30 @@ public class Dstore {
     }
 
 
+    /**
+     * Thread for concurrency of client requests
+     */
     static class DstoreThread implements Runnable {
         Socket client;
 
+        /**
+         * Creates the thread, with the client socket
+         * @param s the socket the client connects to
+         */
         DstoreThread(Socket s) {
             client = s;
         }
 
+        /**
+         * tries to run the method to receive a request
+         */
         public void run() {
             ReceiveRequest(client);
+            try {
+                client.close();
+            } catch (Exception e) {
+                System.err.println("Error: " + e);
+            }
         }
     }
 }
