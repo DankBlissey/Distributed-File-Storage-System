@@ -10,6 +10,7 @@ public class Controller {
     static Integer timeout;
     static Integer rebalancePeriod;
     static ArrayList<FileIndex> Index;
+    static ArrayList<Socket> DstoreList;
 
     public static void main(String[] args) {
         try {
@@ -39,14 +40,40 @@ public class Controller {
             switch(lines[0]) {
                 case "JOIN":
                     System.out.println("Dstore connected with port " + lines[1]);
+                    DstoreList.add(c);
+                    //re-balance could go here?
                     break;
                 case "STORE":
                     System.out.println("Client store request");
+                    if(DstoreList.size() >= R) {
+                        if(!isFileInIndex(lines[1])) {
+                            //store
+                        } else {
+                            System.err.println("Error with storage request: file already exists");
+                            PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                            out.println("ERROR_FILE_ALREADY_EXISTS");
+                        }
+                    } else {
+                        System.err.println("Error with storage request: not enough Dstores");
+                        PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                        out.println("ERROR_NOT_ENOUGH_DSTORES");
+                    }
                     break;
             }
         } catch (Exception e) {
             System.err.println("Error: " + e);
         }
+    }
+
+    public static boolean isFileInIndex(String fileName) {
+        boolean answer = false;
+        for(FileIndex e : Index) {
+            if (e.getFileName().equals(fileName)) {
+                answer = true;
+                break;
+            }
+        }
+        return answer;
     }
 
     static class controllerThread implements Runnable {
