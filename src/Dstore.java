@@ -1,6 +1,8 @@
 import java.io.*;
 import java.net.*;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -10,7 +12,7 @@ import java.util.TimerTask;
  */
 public class Dstore {
     static ServerSocket port = null;
-    static ServerSocket cport = null;
+    static Integer cport = null;
     static Integer timeout = null;
     static String fileFolderTxt = null;
     static Socket client = null;
@@ -24,21 +26,23 @@ public class Dstore {
     public static void main (String [] args) {
         try {
             port = new ServerSocket(Integer.parseInt(args[0]));
-            cport = new ServerSocket(Integer.parseInt(args[1]));
+            cport = Integer.parseInt(args[1]);
             timeout = Integer.parseInt(args[2]);
             fileFolderTxt = args[3];
 
             deleteFilesInFolder(fileFolderTxt);
 
+            //InetAddress address = InetAddress.getLocalHost();
+            //Socket cSocket = new Socket(address, cport);
+
             while(true) {
                 try {
                     assert port != null : "Connection is null:";
-                    client = port.accept();
+                    new Thread(new DstoreThread(port.accept())).start();
                     System.out.println("Client connected:");
                 } catch (Exception e) {
                     System.err.println("Socket Accept failed: ");
                 }
-                ReceiveRequest(client);
             }
         } catch (Exception e) {
             System.err.println("Issues with Dstore setup: " + e);
@@ -83,8 +87,9 @@ public class Dstore {
             BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
             String line;
             line = in.readLine();
-                String[] lines = line.split(" ");
-                if(Objects.equals(lines[0], "STORE") && lines.length == 3) {
+            String[] lines = line.split(" ");
+            switch(lines[0]) {
+                case "STORE":
                     System.out.println("Storage request recieved:");
                     PrintWriter out = new PrintWriter(client.getOutputStream(), true);
                     out.println("ACK");
@@ -95,7 +100,12 @@ public class Dstore {
                         System.err.println("Timeout occurred. Closing connection");
                         client.close();
                     }
-                }
+                    break;
+                case "LOAD_DATA":
+                    System.out.println("Load request received:");
+                    loadFile(client, lines[1]);
+                    break;
+            }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
         }
@@ -122,5 +132,27 @@ public class Dstore {
         }
     }
 
+    public static void loadFile(Socket client, String fileName) {
+        String path = fileFolderTxt + fileName;
+        try {
+            byte[] fileBytes = Files.readAllBytes(Paths.get(path));
+            client.getOutputStream().write(fileBytes);
+            System.out.println("File data sent");
+        } catch (Exception e) {
+            System.err.println("Error: " + e);
+        }
+    }
 
+
+    static class DstoreThread implements Runnable {
+        Socket client;
+
+        DstoreThread(Socket s) {
+            client = s;
+        }
+
+        public void run() {
+            ReceiveRequest(client);
+        }
+    }
 }

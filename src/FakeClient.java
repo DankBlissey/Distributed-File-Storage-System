@@ -27,7 +27,6 @@ public class FakeClient {
                     socket.getOutputStream().write(fileBytes);
                     System.out.println("Data Sent");
                 }
-
             } catch(Exception e) { System.err.println("error: " + e);
             } finally {
                 if (socket != null)
