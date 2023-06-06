@@ -3,6 +3,7 @@ import java.io.File;
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 
 public class Controller {
     static ServerSocket cport;
@@ -10,7 +11,7 @@ public class Controller {
     static Integer timeout;
     static Integer rebalancePeriod;
     static ArrayList<FileIndex> Index;
-    static ArrayList<Socket> DstoreList;
+    static HashMap<String, Socket> DstoreList;
 
     public static void main(String[] args) {
         try {
@@ -40,7 +41,7 @@ public class Controller {
             switch(lines[0]) {
                 case "JOIN":
                     System.out.println("Dstore connected with port " + lines[1]);
-                    DstoreList.add(c);
+                    DstoreList.put(lines[1],c);
                     //re-balance could go here?
                     break;
                 case "STORE":
