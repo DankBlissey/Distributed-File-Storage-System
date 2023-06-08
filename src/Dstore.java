@@ -97,8 +97,8 @@ public class Dstore {
             String line;
             line = in.readLine();
             String[] lines = line.split(" ");
-            switch(lines[0]) {
-                case "STORE":
+            switch (lines[0]) {
+                case "STORE" -> {
                     System.out.println("Storage request recieved:");
                     PrintWriter out = new PrintWriter(client.getOutputStream(), true);
                     out.println("ACK");
@@ -109,11 +109,11 @@ public class Dstore {
                         System.err.println("Timeout occurred. Closing connection");
                         client.close();
                     }
-                    break;
-                case "LOAD_DATA":
+                }
+                case "LOAD_DATA" -> {
                     System.out.println("Load request received:");
                     loadFile(client, lines[1]);
-                    break;
+                }
             }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
@@ -154,6 +154,26 @@ public class Dstore {
             System.out.println("File data sent");
         } catch (Exception e) {
             System.err.println("Error: " + e);
+        }
+    }
+
+
+    public static void listenController(Socket c) {
+        try {
+            BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
+            String line;
+            line = in.readLine();
+            String[] lines = line.split(" ");
+            switch (lines[0]) {
+                case "LIST" -> {
+
+                }
+            }
+            //list
+            //remove
+            //rebalance
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 

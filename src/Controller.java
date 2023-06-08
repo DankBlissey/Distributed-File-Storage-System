@@ -15,8 +15,16 @@ public class Controller {
     static HashMap<String, Socket> DstoreList;
 
 
+    public static synchronized List<String> getIndexDstores(String fileName) {
+        return Index.get(fileName).getDstoreAllocation();
+    }
+
     public static synchronized void addToIndex(FileIndex f) {
         Index.put(f.getFileName(),f);
+    }
+
+    public static synchronized void removeFromIndex(String fileName) {
+        Index.remove(fileName);
     }
 
     public static synchronized void updateIndexStatus(String fileName, String status) {
@@ -25,6 +33,14 @@ public class Controller {
         } catch (Exception e) {
             System.err.println("Typo in status update for index");
         }
+    }
+
+    public static synchronized void countdownIndex(String fileName) {
+        Index.get(fileName).getCountDownLatch().countDown();
+    }
+
+    public static synchronized CountDownLatch getLatch(String fileName) {
+        return Index.get(fileName).getCountDownLatch();
     }
 
     public static synchronized ArrayList<FileIndex> getIndexFiles() {
@@ -47,6 +63,10 @@ public class Controller {
         return DstoreList;
     }
 
+    public static synchronized FileIndex getIndexFile(String fileName) {
+        return Index.get(fileName);
+    }
+
     public static void main(String[] args) {
         try {
             cport = new ServerSocket(Integer.parseInt(args[0]));
@@ -54,12 +74,14 @@ public class Controller {
             timeout = Integer.parseInt(args[2]);
             rebalancePeriod = Integer.parseInt(args[3]);
 
-            try {
-                assert cport != null : "Connection is null";
-                new Thread(new controllerThread(cport.accept())).start();
-                System.out.println("Client connected:");
-            } catch (Exception e) {
-                System.err.println("Error: " + e);
+            while(true) {
+                try {
+                    assert cport != null : "Connection is null";
+                    new Thread(new controllerThread(cport.accept())).start();
+                    System.out.println("Client connected:");
+                } catch (Exception e) {
+                    System.err.println("Error: " + e);
+                }
             }
         } catch (Exception e) {
             System.err.println("Issues with Dstore setup: " + e);
@@ -72,58 +94,134 @@ public class Controller {
             BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
             String line = in.readLine();
             String[] lines = line.split(" ");
-            switch(lines[0]) {
-                case "JOIN":
+            switch (lines[0]) {
+                case "JOIN" -> {
                     System.out.println("Dstore connected with port " + lines[1]);
                     addToDstoreList(lines[1], c);
-                    c.setSoTimeout(timeout);
-                    //re-balance could go here?
-                    break;
-                case "STORE":
+                    in.close();
+                    recieveDstoreMsg(c);
+                }
+                //c.setSoTimeout(timeout);
+                //re-balance could go here?
+                case "STORE" -> {
                     System.out.println("Client store request");
-                    if(getDstoreList().size() >= R) {
-                        if(!isFileInIndex(lines[1])) {
-                            List<String> Dgo = selectDstores();
-                            String fileName = lines[1];
-                            Integer fileSize = Integer.parseInt(lines[2]);
-                            addToIndex(new FileIndex(fileName, fileSize, Dgo));
-                            allocateDstores(c, fileName, Dgo);
+                    synchronized (Controller.class) {
+                        if (getDstoreList().size() >= R) {
+                            if (!isFileInIndex(lines[1])) {
+                                List<String> Dgo = selectDstores();
+                                String fileName = lines[1];
+                                Integer fileSize = Integer.parseInt(lines[2]);
+                                addToIndex(new FileIndex(fileName, fileSize, Dgo));
+                                allocateDstores(c, Dgo);
+                            } else {
+                                System.err.println("Error with storage request: file already exists");
+                                PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                                out.println("ERROR_FILE_ALREADY_EXISTS");
+                                c.close();
+                            }
                         } else {
-                            System.err.println("Error with storage request: file already exists");
+                            System.err.println("Error with storage request: not enough Dstores");
                             PrintWriter out = new PrintWriter(c.getOutputStream(), true);
-                            out.println("ERROR_FILE_ALREADY_EXISTS");
+                            out.println("ERROR_NOT_ENOUGH_DSTORES");
+                            c.close();
+                        }
+                    }
+                    String fileName = lines[1];
+                    try {
+                        Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
+                        if(acknow.equals(true)) {
+                            updateIndexStatus(fileName, "store complete");
+                            PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                            out.println("STORE_COMPLETE");
+                            c.close();
+                        } else {
+                            removeFromIndex(fileName);
+                            c.close();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        removeFromIndex(fileName);
+                        c.close();
+                    }
+                }
+                case "LOAD" -> {
+                    PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                    String fileName = lines[1];
+                    FileIndex file = new FileIndex(getIndexFile(fileName));
+                    List<String> dstores = file.getDstoreAllocation();
+                    if(!dstores.isEmpty()) {
+                        if(getDstoreList().size() >= R) {
+                            out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
+                        } else {
+                            out.println("ERROR_NOT_ENOUGH_DSTORES");
+                            c.close();
                         }
                     } else {
-                        System.err.println("Error with storage request: not enough Dstores");
-                        PrintWriter out = new PrintWriter(c.getOutputStream(), true);
-                        out.println("ERROR_NOT_ENOUGH_DSTORES");
+                        out.println("ERROR_FILE_DOES_NOT_EXIST");
+                        c.close();
                     }
-                    break;
-                case "LIST":
+
+                }
+                case "LIST" -> {
                     PrintWriter out = new PrintWriter(c.getOutputStream());
                     ArrayList<FileIndex> index = new ArrayList<>(getIndexFiles());
-                    for(FileIndex f : index) {
+                    for (FileIndex f : index) {
                         out.print(f.getFileName() + " ");
                     }
                     out.flush();
-                    break;
+                    c.close();
+                }
             }
         } catch (Exception e) {
             System.err.println("Error: " + e);
         }
     }
 
+    public static void recieveDstoreMsg(Socket c) {
+        try {
+            BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
+            while(true) {
+                String line = in.readLine();
+                String[] lines = line.split(" ");
+                switch(lines[0]) {
+                    case "STORE_ACK", "REMOVE_ACK" -> {
+                        String fileName = lines[1];
+                        countdownIndex(fileName);
+                    }
+                    case "LIST" -> {
+                        //stuff to do with re-balancing
+                    }
+                    case "REBALANCE_COMPLETE" -> {
+                        //other stuff
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
     public static synchronized boolean isFileInIndex(String fileName) {
         return getIndex().containsKey(fileName);
     }
 
-    public static void allocateDstores(Socket c, String fileName, List<String> Dgo) {
+    public static void allocateDstores(Socket c, List<String> Dgo) {
         try {
             PrintWriter out = new PrintWriter(c.getOutputStream(), true);
             String DstoresToGo = "STORE_TO " + String.join(" ", Dgo);
-            HashMap<String, Socket> Dstores = new HashMap<>(getDstoreList());
             out.println(DstoresToGo);
+            out.close();
+        } catch (Exception e) {
+            System.err.println("Error : " + e);
+        }
+    }
 
+    /*
+    public static void recieveReplyFromDstores(Socket c, String fileName, List<String> Dgo) {
+        try {
+            PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+            HashMap<String, Socket> Dstores = new HashMap<>(getDstoreList());
             List<String> outPutScraper = Collections.synchronizedList(new ArrayList<>());
             CountDownLatch countDownLatch = new CountDownLatch(R);
             List<Thread> workers = new ArrayList<>();
@@ -132,28 +230,32 @@ public class Controller {
                 workers.add(new Thread(new Worker(s, Dstores.get(s), fileName, outPutScraper, countDownLatch)));
                 target.add("Counted down");
             }
+            // theoretically here is where we could stop the synchronized block
             workers.forEach(Thread::start);
             boolean completed = countDownLatch.await(timeout * 2, TimeUnit.MILLISECONDS);
             outPutScraper.add("Latch released");
             target.add("Latch released");
 
             if(outPutScraper.containsAll(target)) {
+                updateIndexStatus(fileName, "store complete");
                 out.println("STORE_COMPLETE");
                 c.close();
             } else {
-
+                removeFromIndex(fileName);
             }
         } catch (Exception e) {
-            System.err.println("Error : " + e);
+            e.printStackTrace();
         }
     }
+
+     */
 
     public static List<String> selectDstores() {
         List<String> Dstores;
         List<String> DstoresWithFiles;
         synchronized (Controller.class) {
             Dstores = new ArrayList<>(getDstoreList().keySet());
-            DstoresWithFiles = new ArrayList<>(getLocationsWithLeastFiles());
+            DstoresWithFiles = getLocationsWithLeastFiles();
         }
         Dstores.removeAll(DstoresWithFiles);
         int n = R - Dstores.size();
@@ -163,11 +265,13 @@ public class Controller {
 
     public static List<String> getLocationsWithLeastFiles() {
         HashMap<String, Integer> storageCounts = new HashMap<>();
-        ArrayList<FileIndex> index = new ArrayList<>(getIndexFiles());
-        for (FileIndex entry : index) {
-            List<String> locations = entry.getDstoreAllocation();
-            for (String location : locations) {
-                storageCounts.put(location, storageCounts.getOrDefault(location, 0) + entry.getFileSize());
+        synchronized (Controller.class) {
+            ArrayList<FileIndex> index = getIndexFiles();
+            for (FileIndex entry : index) {
+                List<String> locations = entry.getDstoreAllocation();
+                for (String location : locations) {
+                    storageCounts.put(location, storageCounts.getOrDefault(location, 0) + entry.getFileSize());
+                }
             }
         }
         List<String> sortedLocations = new ArrayList<>(storageCounts.keySet());
@@ -175,6 +279,7 @@ public class Controller {
         return sortedLocations;
     }
 
+    /*
     static class Worker implements Runnable {
         private List<String> outputScraper;
         private CountDownLatch countDownLatch;
@@ -211,6 +316,7 @@ public class Controller {
             }
         }
     }
+    */
 
     /*
     static class DstoreReplyJob implements Callable<Boolean> {
@@ -248,9 +354,4 @@ public class Controller {
             receive(connector);
         }
     }
-
-
-
-
-
 }
