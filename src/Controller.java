@@ -3,21 +3,35 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Stream;
 
 public class Controller {
     static ServerSocket cport;
     static Integer R;
     static Integer timeout;
     static Integer rebalancePeriod;
-    static ArrayList<FileIndex> Index;
+    //static ArrayList<FileIndex> Index;
+    static HashMap<String, FileIndex> Index;
     static HashMap<String, Socket> DstoreList;
 
 
     public static synchronized void addToIndex(FileIndex f) {
-        Index.add(f);
+        Index.put(f.getFileName(),f);
     }
 
-    public static synchronized ArrayList<FileIndex> getIndex() {
+    public static synchronized void updateIndexStatus(String fileName, String status) {
+        try {
+            Index.get(fileName).setStatus(status);
+        } catch (Exception e) {
+            System.err.println("Typo in status update for index");
+        }
+    }
+
+    public static synchronized ArrayList<FileIndex> getIndexFiles() {
+        return new ArrayList<>(Index.values());
+    }
+
+    public static synchronized HashMap<String, FileIndex> getIndex() {
         return Index;
     }
 
@@ -62,15 +76,16 @@ public class Controller {
                 case "JOIN":
                     System.out.println("Dstore connected with port " + lines[1]);
                     addToDstoreList(lines[1], c);
+                    c.setSoTimeout(timeout);
                     //re-balance could go here?
                     break;
                 case "STORE":
                     System.out.println("Client store request");
                     if(getDstoreList().size() >= R) {
                         if(!isFileInIndex(lines[1])) {
+                            List<String> Dgo = selectDstores();
                             String fileName = lines[1];
                             Integer fileSize = Integer.parseInt(lines[2]);
-                            List<String> Dgo = selectDstores();
                             addToIndex(new FileIndex(fileName, fileSize, Dgo));
                             allocateDstores(c, fileName, Dgo);
                         } else {
@@ -86,7 +101,7 @@ public class Controller {
                     break;
                 case "LIST":
                     PrintWriter out = new PrintWriter(c.getOutputStream());
-                    ArrayList<FileIndex> index = new ArrayList<>(getIndex());
+                    ArrayList<FileIndex> index = new ArrayList<>(getIndexFiles());
                     for(FileIndex f : index) {
                         out.print(f.getFileName() + " ");
                     }
@@ -98,64 +113,48 @@ public class Controller {
         }
     }
 
-    public static boolean isFileInIndex(String fileName) {
-        boolean answer = false;
-        for(FileIndex e : getIndex()) {
-            if (e.getFileName().equals(fileName)) {
-                answer = true;
-                break;
-            }
-        }
-        return answer;
+    public static synchronized boolean isFileInIndex(String fileName) {
+        return getIndex().containsKey(fileName);
     }
 
-    public static ArrayList<String> allocateDstores(Socket c, String fileName, List<String> Dgo) {
+    public static void allocateDstores(Socket c, String fileName, List<String> Dgo) {
         try {
             PrintWriter out = new PrintWriter(c.getOutputStream(), true);
             String DstoresToGo = "STORE_TO " + String.join(" ", Dgo);
             HashMap<String, Socket> Dstores = new HashMap<>(getDstoreList());
             out.println(DstoresToGo);
-            ExecutorService service = Executors.newFixedThreadPool(R);
-            HashMap<String, Future<Boolean>> futures = new HashMap<>();
+
+            List<String> outPutScraper = Collections.synchronizedList(new ArrayList<>());
+            CountDownLatch countDownLatch = new CountDownLatch(R);
+            List<Thread> workers = new ArrayList<>();
+            ArrayList<String> target = new ArrayList<>();
             for(String s : Dgo) {
-                futures.put(s,service.submit(new DstoreReplyJob(Dstores.get(s), fileName)));
+                workers.add(new Thread(new Worker(s, Dstores.get(s), fileName, outPutScraper, countDownLatch)));
+                target.add("Counted down");
             }
-            ArrayList<String> FailedDstores = new ArrayList<>();
-            futures.forEach((key, value) -> {
-                Boolean allM = true;
-                try {
-                    if(value.get(timeout + 50, TimeUnit.MILLISECONDS).equals(false)) {
-                        System.err.println("Message from Dstore" + key + " incorrect");
-                        FailedDstores.add(key);
-                        allM = false;
-                    }
-                    if(allM.equals(true)) {
-                        out.println("STORE_COMPLETE");
-                    }
-                } catch (InterruptedException | TimeoutException e) {
-                    e.printStackTrace();
-                } catch (ExecutionException e) {
-                    if(e.getCause() instanceof SocketTimeoutException) {
-                        System.err.println("Timeout occurred with Dstore " + key);
-                        FailedDstores.add(key);
-                    }
-                }
-            });
-            try {
+            workers.forEach(Thread::start);
+            boolean completed = countDownLatch.await(timeout * 2, TimeUnit.MILLISECONDS);
+            outPutScraper.add("Latch released");
+            target.add("Latch released");
+
+            if(outPutScraper.containsAll(target)) {
+                out.println("STORE_COMPLETE");
                 c.close();
-            } catch (Exception e) {
-                System.err.println("Error with closing client socket: " + e);
+            } else {
+
             }
-            return FailedDstores;
         } catch (Exception e) {
             System.err.println("Error : " + e);
-            return null;
         }
     }
 
     public static List<String> selectDstores() {
-        List<String> Dstores = new ArrayList<>(getDstoreList().keySet());
-        List<String> DstoresWithFiles = new ArrayList<>(getLocationsWithLeastFiles());
+        List<String> Dstores;
+        List<String> DstoresWithFiles;
+        synchronized (Controller.class) {
+            Dstores = new ArrayList<>(getDstoreList().keySet());
+            DstoresWithFiles = new ArrayList<>(getLocationsWithLeastFiles());
+        }
         Dstores.removeAll(DstoresWithFiles);
         int n = R - Dstores.size();
         Dstores.addAll(DstoresWithFiles.subList(0, Math.min(n, DstoresWithFiles.size())));
@@ -164,7 +163,7 @@ public class Controller {
 
     public static List<String> getLocationsWithLeastFiles() {
         HashMap<String, Integer> storageCounts = new HashMap<>();
-        ArrayList<FileIndex> index = new ArrayList<>(getIndex());
+        ArrayList<FileIndex> index = new ArrayList<>(getIndexFiles());
         for (FileIndex entry : index) {
             List<String> locations = entry.getDstoreAllocation();
             for (String location : locations) {
@@ -176,6 +175,44 @@ public class Controller {
         return sortedLocations;
     }
 
+    static class Worker implements Runnable {
+        private List<String> outputScraper;
+        private CountDownLatch countDownLatch;
+        private String port;
+        private Socket connector;
+        private String fileName;
+
+        public Worker(String port, Socket c, String s, List<String> outputScraper, CountDownLatch countDownLatch) {
+            this.port = port;
+            this.connector = c;
+            this.fileName = s;
+            this.outputScraper = outputScraper;
+            this.countDownLatch = countDownLatch;
+        }
+
+        @Override
+        public void run() {
+            try {
+                BufferedReader in = new BufferedReader(new InputStreamReader(connector.getInputStream()));
+                String line;
+                line = in.readLine();
+                if(!line.equals("STORE_ACK " + fileName)) {
+                    System.err.println("Thread: Storage acceptance message incorrect");
+                    System.err.println("Dstore non-functional, removing Dstore");
+                    //remove Dstore method goes here
+                } else {
+                    outputScraper.add("Counted down");
+                    countDownLatch.countDown();
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e);
+                outputScraper.add("failed for Dstore: " + port);
+                countDownLatch.countDown();
+            }
+        }
+    }
+
+    /*
     static class DstoreReplyJob implements Callable<Boolean> {
         Socket connector;
         String fileName;
@@ -187,11 +224,9 @@ public class Controller {
 
         @Override
         public Boolean call() throws Exception {
-            connector.setSoTimeout(timeout);
             BufferedReader in = new BufferedReader(new InputStreamReader(connector.getInputStream()));
             String line;
             line = in.readLine();
-            connector.setSoTimeout(0);
             if(!line.equals("STORE_ACK " + fileName)) {
                 System.err.println("Thread: Storage acceptance message incorrect");
                 return false;
@@ -200,7 +235,7 @@ public class Controller {
             }
         }
     }
-
+     */
     static class controllerThread implements Runnable {
 
         Socket connector;
