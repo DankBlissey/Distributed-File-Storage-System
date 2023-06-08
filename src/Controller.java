@@ -13,7 +13,15 @@ public class Controller {
     //static ArrayList<FileIndex> Index;
     static HashMap<String, FileIndex> Index;
     static HashMap<String, Socket> DstoreList;
+    static ThreadLocal<Integer> indexToStore = new ThreadLocal<>();
 
+    public static void setIndexToStore(int value) {
+        indexToStore.set(value);
+    }
+
+    public static int getIndexToStore() {
+        return indexToStore.get();
+    }
 
     public static synchronized List<String> getIndexDstores(String fileName) {
         return Index.get(fileName).getDstoreAllocation();
@@ -145,6 +153,7 @@ public class Controller {
                     }
                 }
                 case "LOAD" -> {
+                    setIndexToStore(0);
                     PrintWriter out = new PrintWriter(c.getOutputStream(), true);
                     String fileName = lines[1];
                     FileIndex file = new FileIndex(getIndexFile(fileName));
@@ -152,6 +161,8 @@ public class Controller {
                     if(!dstores.isEmpty()) {
                         if(getDstoreList().size() >= R) {
                             out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
+                            out.close();
+                            receive(c);
                         } else {
                             out.println("ERROR_NOT_ENOUGH_DSTORES");
                             c.close();
@@ -160,7 +171,46 @@ public class Controller {
                         out.println("ERROR_FILE_DOES_NOT_EXIST");
                         c.close();
                     }
+                }
+                case "RELOAD" -> {
+                    setIndexToStore(getIndexToStore()+1);
+                    PrintWriter out = new PrintWriter(c.getOutputStream(), true);
+                    String fileName = lines[1];
+                    FileIndex file = new FileIndex(getIndexFile(fileName));
+                    List<String> dstores = file.getDstoreAllocation();
+                    if(dstores.size() > getIndexToStore()) {
+                        if(!dstores.isEmpty()) {
+                            if(getDstoreList().size() >= R) {
+                                out.println("LOAD_FROM " + dstores.get(getIndexToStore()) + " " + file.getFileSize().toString());
+                                out.close();
+                                receive(c);
+                            } else {
+                                out.println("ERROR_NOT_ENOUGH_DSTORES");
+                                c.close();
+                            }
+                        } else {
+                            out.println("ERROR_FILE_DOES_NOT_EXIST");
+                            c.close();
+                        }
+                    } else {
+                        out.println("ERROR_LOAD");
+                        c.close();
+                    }
 
+                }
+                case "REMOVE" -> {
+                    System.out.println("client remove request: ");
+                    String fileName = lines[1];
+                    synchronized (Controller.class) {
+                        if (getDstoreList().size() >= R) {
+                            if (isFileInIndex(lines[1])) {
+                                if (getIndexFile(fileName).getStatus().equals("store complete")) {
+                                    updateIndexStatus(fileName, "remove in progress");
+
+                                }
+                            }
+                        }
+                    }
                 }
                 case "LIST" -> {
                     PrintWriter out = new PrintWriter(c.getOutputStream());
@@ -345,12 +395,16 @@ public class Controller {
     static class controllerThread implements Runnable {
 
         Socket connector;
+        private int threadVariable;
+
 
         controllerThread(Socket c) {
             connector = c;
+            this.threadVariable = 0;
         }
 
         public void run() {
+            Controller.setIndexToStore(threadVariable);
             receive(connector);
         }
     }
