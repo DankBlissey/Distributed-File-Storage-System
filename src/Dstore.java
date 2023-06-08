@@ -15,7 +15,11 @@ public class Dstore {
     static Integer cport = null;
     static Integer timeout = null;
     static String fileFolderTxt = null;
-    //static Socket controller = null;
+    static Socket controller = null;
+
+    static synchronized Socket getController() {
+        return controller;
+    }
 
     /**
      * Main method for running Dstore
@@ -33,8 +37,8 @@ public class Dstore {
             deleteFilesInFolder(fileFolderTxt);
 
             InetAddress address = InetAddress.getLocalHost();
-            Socket cSocket = new Socket(address, cport);
-            PrintWriter out = new PrintWriter(cSocket.getOutputStream(), true);
+            controller = new Socket(address, cport);
+            PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
             out.println("JOIN " + args[0]);
 
             while(true) {
@@ -69,11 +73,14 @@ public class Dstore {
             while ((bytesRead = inputStream.readNBytes(buffer, 0, buffer.length)) > 0) {
                 fileOutputStream.write(buffer, 0, bytesRead);
             }
-
             fileOutputStream.close();
-            //client.close();
+            client.close();
 
             System.out.println("File recieved and saved to: " + fileFolderTxt);
+
+            PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
+            out.println("STORE_ACK");
+            out.close();
         } catch (Exception e) {
             System.err.println("error: " + e);
         }
