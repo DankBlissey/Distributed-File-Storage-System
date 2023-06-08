@@ -278,7 +278,7 @@ public class Controller {
                         //other stuff
                     }
                     case "ERROR_FILE_DOES_NOT_EXIST" -> {
-                        //
+                        System.err.println("Dstore " + c.getPort() + " Sent that the file doesn't exist for a remove request");
                     }
                 }
             }

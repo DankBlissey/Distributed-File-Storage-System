@@ -12,6 +12,7 @@ import java.util.TimerTask;
  */
 public class Dstore {
     static ServerSocket port = null;
+    static String portText = null;
     static Integer cport = null;
     static Integer timeout = null;
     static String fileFolderTxt = null;
@@ -29,17 +30,19 @@ public class Dstore {
      */
     public static void main (String [] args) {
         try {
-            port = new ServerSocket(Integer.parseInt(args[0]));
+            portText = args[0];
+            port = new ServerSocket(Integer.parseInt(portText));
             cport = Integer.parseInt(args[1]);
             timeout = Integer.parseInt(args[2]);
             fileFolderTxt = args[3];
 
             deleteFilesInFolder(fileFolderTxt);
-
             InetAddress address = InetAddress.getLocalHost();
             controller = new Socket(address, cport);
             PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
-            out.println("JOIN " + args[0]);
+            out.println("JOIN " + portText);
+
+            new Thread(new DstoreControllerThread()).start();
 
             while(true) {
                 try {
@@ -141,6 +144,24 @@ public class Dstore {
         }
     }
 
+    public static void removeFile(String fileName) {
+        String folderPath = fileFolderTxt + fileName;
+        File file = new File(folderPath);
+        try {
+            PrintWriter out = new PrintWriter(controller.getOutputStream(), true);
+            if(file.exists()) {
+                System.out.println("File deleted " + file.delete());
+                out.println("REMOVE_ACK " + fileName);
+                out.close();
+            } else {
+                out.println("ERROR_FILE_DOES_NOT_EXIST");
+                out.close();
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     /**
      * Takes a filename, finds that file within the Dstore storage location, and then outputs its content to the client
      * @param client socket for the client connection
@@ -158,14 +179,21 @@ public class Dstore {
     }
 
 
-    public static void listenController(Socket c) {
+    public static void listenController() {
         try {
-            BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
+            BufferedReader in = new BufferedReader(new InputStreamReader(controller.getInputStream()));
             String line;
             line = in.readLine();
             String[] lines = line.split(" ");
             switch (lines[0]) {
                 case "LIST" -> {
+
+                }
+                case "REMOVE" -> {
+                    String fileName = lines[1];
+                    removeFile(fileName);
+                }
+                case "REBALANCE" -> {
 
                 }
             }
@@ -206,14 +234,16 @@ public class Dstore {
     }
 
     static class DstoreControllerThread implements Runnable {
-        Socket controller;
 
-        DstoreControllerThread(Socket c) {
-            controller = c;
+
+        DstoreControllerThread() {
+
         }
 
         public void run() {
-            // receive controller request
+            while(true) {
+                listenController();
+            }
         }
     }
 }
