@@ -15,7 +15,7 @@ public class Dstore {
     static Integer cport = null;
     static Integer timeout = null;
     static String fileFolderTxt = null;
-    static Socket client = null;
+    //static Socket controller = null;
 
     /**
      * Main method for running Dstore
@@ -175,6 +175,18 @@ public class Dstore {
             } catch (Exception e) {
                 System.err.println("Error: " + e);
             }
+        }
+    }
+
+    static class DstoreControllerThread implements Runnable {
+        Socket controller;
+
+        DstoreControllerThread(Socket c) {
+            controller = c;
+        }
+
+        public void run() {
+            // receive controller request
         }
     }
 }

@@ -1,11 +1,12 @@
+import java.util.List;
 
 public class FileIndex {
     String fileName;
     Integer fileSize;
-    Integer[] DstoreAllocation;
+    List<String> DstoreAllocation;
     String status;
 
-    FileIndex(String name, Integer size, Integer[] allocation) {
+    FileIndex(String name, Integer size, List<String> allocation) {
         fileName = name;
         fileSize = size;
         DstoreAllocation = allocation;
@@ -28,16 +29,24 @@ public class FileIndex {
         return this.fileSize;
     }
 
-    public void setDstoreAllocation(int index, Integer port) {
-        this.DstoreAllocation[index] = port;
+    public void setDstoreAllocation(int index, String port) {
+        this.DstoreAllocation.set(index, port);
     }
 
-    public Integer[] getDstoreAllocation() {
+    public void addDstoreToAllocation(String port) {
+        this.DstoreAllocation.add(port);
+    }
+
+    public void removeDstoreFromAllocation(String port) {
+        this.DstoreAllocation.remove(port);
+    }
+
+    public List<String> getDstoreAllocation() {
         return this.DstoreAllocation;
     }
 
-    public Integer getOneDstoreAllocation(int index) {
-        return this.DstoreAllocation[index];
+    public String getOneDstoreAllocation(int index) {
+        return this.DstoreAllocation.get(index);
     }
 
     public void setStatus(String st) throws Exception {
