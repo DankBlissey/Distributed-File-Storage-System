@@ -51,6 +51,10 @@ public class Controller {
         return Index.get(fileName).getCountDownLatch();
     }
 
+    public static synchronized void setLatch(String fileName, int i) {
+        Index.get(fileName).setCountDownLatch(i);
+    }
+
     public static synchronized ArrayList<FileIndex> getIndexFiles() {
         return new ArrayList<>(Index.values());
     }
@@ -141,6 +145,7 @@ public class Controller {
                             updateIndexStatus(fileName, "store complete");
                             PrintWriter out = new PrintWriter(c.getOutputStream(), true);
                             out.println("STORE_COMPLETE");
+                            setLatch(fileName, R);
                             c.close();
                         } else {
                             removeFromIndex(fileName);
@@ -201,15 +206,43 @@ public class Controller {
                 case "REMOVE" -> {
                     System.out.println("client remove request: ");
                     String fileName = lines[1];
+                    PrintWriter outC = new PrintWriter(c.getOutputStream());
                     synchronized (Controller.class) {
                         if (getDstoreList().size() >= R) {
                             if (isFileInIndex(lines[1])) {
                                 if (getIndexFile(fileName).getStatus().equals("store complete")) {
                                     updateIndexStatus(fileName, "remove in progress");
-
+                                    List<String> DstoresWFile = getIndexFile(fileName).getDstoreAllocation();
+                                    for(String s : DstoresWFile) {
+                                        PrintWriter out = new PrintWriter(getDstore(s).getOutputStream(), true);
+                                        out.println("REMOVE " + fileName);
+                                        out.close();
+                                    }
+                                } else {
+                                    System.err.println("File requested to be removed was not a fully stored file");
                                 }
+                            } else {
+                                outC.println("ERROR_FILE_DOES_NOT_EXIST");
+                                outC.close();
                             }
+                        } else {
+                            outC.println("ERROR_NOT_ENOUGH_DSTORES");
+                            outC.close();
                         }
+                    }
+                    try {
+                        Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
+                        if(acknow.equals(true)) {
+                            updateIndexStatus(fileName, "remove complete");
+                            outC.println("REMOVE_COMPLETE");
+                            c.close();
+                        } else {
+                            System.err.println("timeout with receiving acknowledgement of removal");
+                            c.close();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        c.close();
                     }
                 }
                 case "LIST" -> {
@@ -243,6 +276,9 @@ public class Controller {
                     }
                     case "REBALANCE_COMPLETE" -> {
                         //other stuff
+                    }
+                    case "ERROR_FILE_DOES_NOT_EXIST" -> {
+                        //
                     }
                 }
             }

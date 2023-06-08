@@ -29,6 +29,10 @@ public class FileIndex {
         return this.cdLatch;
     }
 
+    public void setCountDownLatch(int i) {
+        this.cdLatch = new CountDownLatch(i);
+    }
+
     public void setFileName(String name) {
         this.fileName = name;
     }
