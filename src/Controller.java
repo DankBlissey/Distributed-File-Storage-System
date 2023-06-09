@@ -5,14 +5,15 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Stream;
 
+
 public class Controller {
     static ServerSocket cport;
     static Integer R;
     static Integer timeout;
     static Integer rebalancePeriod;
     //static ArrayList<FileIndex> Index;
-    static HashMap<String, FileIndex> Index;
-    static HashMap<String, Socket> DstoreList;
+    static HashMap<String, FileIndex> Index = new HashMap<>();
+    static HashMap<String, Socket> DstoreList = new HashMap<>();
     static ThreadLocal<Integer> indexToStore = new ThreadLocal<>();
 
     public static void setIndexToStore(int value) {
@@ -85,10 +86,11 @@ public class Controller {
             R = Integer.parseInt(args[1]);
             timeout = Integer.parseInt(args[2]);
             rebalancePeriod = Integer.parseInt(args[3]);
+            System.out.println("Starting");
 
             while(true) {
                 try {
-                    assert cport != null : "Connection is null";
+                    System.out.println("New connection being accepted");
                     new Thread(new controllerThread(cport.accept())).start();
                     System.out.println("Client connected:");
                 } catch (Exception e) {
@@ -103,15 +105,26 @@ public class Controller {
 
     public static void receive(Socket c) {
         try {
+            System.out.println("Reading input");
             BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
+            System.out.println("Reading line");
             String line = in.readLine();
+            System.out.println("Line read");
             String[] lines = line.split(" ");
             switch (lines[0]) {
                 case "JOIN" -> {
                     System.out.println("Dstore connected with port " + lines[1]);
+                    if(c.isClosed()) {
+                        System.out.println("socket closed before adding to dstorelist");
+                    }
                     addToDstoreList(lines[1], c);
-                    in.close();
+                    if(c.isClosed()) {
+                        System.out.println("socket closed after adding to dstorelist");
+                    }
+                    System.out.println("Added to the DstoreList, now closing input");
+                    System.out.println("Input closed, now running receive method");
                     recieveDstoreMsg(c);
+
                 }
                 //c.setSoTimeout(timeout);
                 //re-balance could go here?
@@ -166,7 +179,6 @@ public class Controller {
                     if(!dstores.isEmpty()) {
                         if(getDstoreList().size() >= R) {
                             out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
-                            out.close();
                             receive(c);
                         } else {
                             out.println("ERROR_NOT_ENOUGH_DSTORES");
@@ -187,7 +199,6 @@ public class Controller {
                         if(!dstores.isEmpty()) {
                             if(getDstoreList().size() >= R) {
                                 out.println("LOAD_FROM " + dstores.get(getIndexToStore()) + " " + file.getFileSize().toString());
-                                out.close();
                                 receive(c);
                             } else {
                                 out.println("ERROR_NOT_ENOUGH_DSTORES");
@@ -216,7 +227,6 @@ public class Controller {
                                     for(String s : DstoresWFile) {
                                         PrintWriter out = new PrintWriter(getDstore(s).getOutputStream(), true);
                                         out.println("REMOVE " + fileName);
-                                        out.close();
                                     }
                                 } else {
                                     System.err.println("File requested to be removed was not a fully stored file");
@@ -252,7 +262,6 @@ public class Controller {
                         out.print(f.getFileName() + " ");
                     }
                     out.flush();
-                    c.close();
                 }
             }
         } catch (Exception e) {
@@ -262,12 +271,23 @@ public class Controller {
 
     public static void recieveDstoreMsg(Socket c) {
         try {
-            BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
             while(true) {
+                System.out.println("Creating bufferedReader for recieving Dstore Messages");
+                if(c.isClosed()) {
+                    System.err.println("socket is closed in recieveDstoreMsg");
+                    break;
+                }
+                BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
+                System.out.println("buffered reader created");
+                while(!in.ready()) {
+
+                }
+                System.out.println("in is ready");
                 String line = in.readLine();
                 String[] lines = line.split(" ");
                 switch(lines[0]) {
                     case "STORE_ACK", "REMOVE_ACK" -> {
+                        System.out.println("Acknowledgement recieved");
                         String fileName = lines[1];
                         countdownIndex(fileName);
                     }
@@ -297,7 +317,6 @@ public class Controller {
             PrintWriter out = new PrintWriter(c.getOutputStream(), true);
             String DstoresToGo = "STORE_TO " + String.join(" ", Dgo);
             out.println(DstoresToGo);
-            out.close();
         } catch (Exception e) {
             System.err.println("Error : " + e);
         }
@@ -442,6 +461,85 @@ public class Controller {
         public void run() {
             Controller.setIndexToStore(threadVariable);
             receive(connector);
+        }
+    }
+
+    public static class FileIndex {
+        String fileName;
+        Integer fileSize;
+        List<String> DstoreAllocation;
+        String status;
+        CountDownLatch cdLatch;
+
+        FileIndex(String name, Integer size, List<String> allocation) {
+            fileName = name;
+            fileSize = size;
+            DstoreAllocation = allocation;
+            status = "store in progress";
+            cdLatch = new CountDownLatch(allocation.size());
+        }
+
+        FileIndex(FileIndex f) {
+            fileName = f.getFileName();
+            fileSize = f.getFileSize();
+            DstoreAllocation = f.getDstoreAllocation();
+            status = f.getStatus();
+            cdLatch = f.getCountDownLatch();
+        }
+
+        public CountDownLatch getCountDownLatch() {
+            return this.cdLatch;
+        }
+
+        public void setCountDownLatch(int i) {
+            this.cdLatch = new CountDownLatch(i);
+        }
+
+        public void setFileName(String name) {
+            this.fileName = name;
+        }
+
+        public String getFileName() {
+            return this.fileName;
+        }
+
+        public void setFileSize(Integer size) {
+            this.fileSize = size;
+        }
+
+        public Integer getFileSize() {
+            return this.fileSize;
+        }
+
+        public void setDstoreAllocation(int index, String port) {
+            this.DstoreAllocation.set(index, port);
+        }
+
+        public void addDstoreToAllocation(String port) {
+            this.DstoreAllocation.add(port);
+        }
+
+        public void removeDstoreFromAllocation(String port) {
+            this.DstoreAllocation.remove(port);
+        }
+
+        public List<String> getDstoreAllocation() {
+            return this.DstoreAllocation;
+        }
+
+        public String getOneDstoreAllocation(int index) {
+            return this.DstoreAllocation.get(index);
+        }
+
+        public void setStatus(String st) throws Exception {
+            switch (st) {
+                case "store in progress", "store complete", "remove in progress", "remove complete" -> this.status = st;
+                default -> throw new Exception("Wrong status");
+            }
+        }
+
+        public String getStatus() {
+            return this.status;
         }
     }
 }

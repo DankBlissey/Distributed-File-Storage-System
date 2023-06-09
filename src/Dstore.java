@@ -17,6 +17,8 @@ public class Dstore {
     static Integer timeout = null;
     static String fileFolderTxt = null;
     static Socket controller = null;
+    static BufferedReader IN;
+    static PrintWriter OUT;
 
     static synchronized Socket getController() {
         return controller;
@@ -35,18 +37,33 @@ public class Dstore {
             cport = Integer.parseInt(args[1]);
             timeout = Integer.parseInt(args[2]);
             fileFolderTxt = args[3];
+            System.out.println("Initial variables set");
 
             deleteFilesInFolder(fileFolderTxt);
+            System.out.println("Attempting to get address");
             InetAddress address = InetAddress.getLocalHost();
+            System.out.println("Attempting to add controller socket");
             controller = new Socket(address, cport);
-            PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
-            out.println("JOIN " + portText);
+            if(getController().isClosed()) {
+                System.out.println("controller socket closed after being made");
+            }
+            System.out.println("Attempting to create printwriter");
+            OUT = new PrintWriter(getController().getOutputStream(), true);
+            IN = new BufferedReader(new InputStreamReader(getController().getInputStream()));
+            if(getController().isClosed()) {
+                System.out.println("controller socket closed after in and out made");
+            }
+            System.out.println("Attempting to join");
+            OUT.println("JOIN " + portText);
+            if(getController().isClosed()) {
+                System.out.println("controller socket closed after out.println");
+            }
+            System.out.println("join attempted");
 
-            new Thread(new DstoreControllerThread()).start();
+            //new Thread(new DstoreControllerThread()).start();
 
             while(true) {
                 try {
-                    assert port != null : "Connection is null:";
                     new Thread(new DstoreThread(port.accept())).start();
                     System.out.println("Client connected:");
                 } catch (Exception e) {
@@ -83,7 +100,6 @@ public class Dstore {
 
             PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
             out.println("STORE_ACK");
-            out.close();
         } catch (Exception e) {
             System.err.println("error: " + e);
         }
@@ -98,6 +114,9 @@ public class Dstore {
         try {
             BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
             String line;
+            while(!in.ready()) {
+
+            }
             line = in.readLine();
             String[] lines = line.split(" ");
             switch (lines[0]) {
@@ -148,14 +167,14 @@ public class Dstore {
         String folderPath = fileFolderTxt + fileName;
         File file = new File(folderPath);
         try {
-            PrintWriter out = new PrintWriter(controller.getOutputStream(), true);
+            //PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
             if(file.exists()) {
                 System.out.println("File deleted " + file.delete());
-                out.println("REMOVE_ACK " + fileName);
-                out.close();
+                OUT.println("REMOVE_ACK " + fileName);
+                //OUT.close();
             } else {
-                out.println("ERROR_FILE_DOES_NOT_EXIST");
-                out.close();
+                OUT.println("ERROR_FILE_DOES_NOT_EXIST");
+                //OUT.close();
             }
         } catch(Exception e) {
             e.printStackTrace();
@@ -181,25 +200,30 @@ public class Dstore {
 
     public static void listenController() {
         try {
-            BufferedReader in = new BufferedReader(new InputStreamReader(controller.getInputStream()));
-            String line;
-            line = in.readLine();
-            String[] lines = line.split(" ");
-            switch (lines[0]) {
-                case "LIST" -> {
-
+            while(true) {
+                System.out.println("created buffered reader");
+                String line;
+                System.out.println("about to read the line");
+                while(!IN.ready()) {
+                    //System.out.println("in not ready in listenController");
+                    //wait for IN to be ready
                 }
-                case "REMOVE" -> {
-                    String fileName = lines[1];
-                    removeFile(fileName);
-                }
-                case "REBALANCE" -> {
+                System.out.println("buffered reader is ready");
+                line = IN.readLine();
+                String[] lines = line.split(" ");
+                switch (lines[0]) {
+                    case "LIST" -> {
 
+                    }
+                    case "REMOVE" -> {
+                        String fileName = lines[1];
+                        removeFile(fileName);
+                    }
+                    case "REBALANCE" -> {
+
+                    }
                 }
             }
-            //list
-            //remove
-            //rebalance
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -241,9 +265,7 @@ public class Dstore {
         }
 
         public void run() {
-            while(true) {
-                listenController();
-            }
+            listenController();
         }
     }
 }
