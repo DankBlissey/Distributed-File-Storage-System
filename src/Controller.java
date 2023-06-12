@@ -139,13 +139,13 @@ public class Controller {
                                 System.err.println("Error with storage request: file already exists");
                                 out.println("ERROR_FILE_ALREADY_EXISTS");
                                 out.flush();
-                                c.close();
+                                //c.close();
                             }
                         } else {
                             System.err.println("Error with storage request: not enough Dstores");
                             out.println("ERROR_NOT_ENOUGH_DSTORES");
                             out.flush();
-                            c.close();
+                            //c.close();
                         }
                     }
                     String fileName = lines[1];
@@ -156,15 +156,15 @@ public class Controller {
                             out.println("STORE_COMPLETE");
                             out.flush();
                             setLatch(fileName, R);
-                            c.close();
+                            //c.close();
                         } else {
                             removeFromIndex(fileName);
-                            c.close();
+                            //c.close();
                         }
                     } catch (Exception e) {
                         e.printStackTrace();
                         removeFromIndex(fileName);
-                        c.close();
+                        //c.close();
                     }
                 }
                 case "LOAD" -> {
@@ -180,12 +180,12 @@ public class Controller {
                         } else {
                             out.println("ERROR_NOT_ENOUGH_DSTORES");
                             out.flush();
-                            c.close();
+                            //c.close();
                         }
                     } else {
                         out.println("ERROR_FILE_DOES_NOT_EXIST");
                         out.flush();
-                        c.close();
+                        //c.close();
                     }
                 }
                 case "RELOAD" -> {
@@ -202,17 +202,17 @@ public class Controller {
                             } else {
                                 out.println("ERROR_NOT_ENOUGH_DSTORES");
                                 out.flush();
-                                c.close();
+                                //c.close();
                             }
                         } else {
                             out.println("ERROR_FILE_DOES_NOT_EXIST");
                             out.flush();
-                            c.close();
+                            //c.close();
                         }
                     } else {
                         out.println("ERROR_LOAD");
                         out.flush();
-                        c.close();
+                        //c.close();
                     }
 
                 }
@@ -235,12 +235,12 @@ public class Controller {
                             } else {
                                 out.println("ERROR_FILE_DOES_NOT_EXIST");
                                 out.flush();
-                                c.close();
+                                //c.close();
                             }
                         } else {
                             out.println("ERROR_NOT_ENOUGH_DSTORES");
                             out.flush();
-                            c.close();
+                            //c.close();
                         }
                     }
                     try {
@@ -248,14 +248,14 @@ public class Controller {
                         if(acknow.equals(true)) {
                             updateIndexStatus(fileName, "remove complete");
                             out.println("REMOVE_COMPLETE");
-                            c.close();
+                            //c.close();
                         } else {
                             System.err.println("timeout with receiving acknowledgement of removal");
-                            c.close();
+                            //c.close();
                         }
                     } catch (Exception e) {
                         e.printStackTrace();
-                        c.close();
+                        //c.close();
                     }
                 }
                 case "LIST" -> {
@@ -274,7 +274,7 @@ public class Controller {
                     } else {
                         out.println("ERROR_NOT_ENOUGH_DSTORES");
                         out.flush();
-                        c.close();
+                        //c.close();
                     }
                 }
                 default -> System.err.println("Malformed client/Dstore message received, message was: " + lines[0]);
@@ -370,8 +370,10 @@ public class Controller {
         }
 
         public void run() {
-            setIndexToStore(0);
-            receive(connector, in, out);
+            while(!connector.isClosed()) {
+                setIndexToStore(0);
+                receive(connector, in, out);
+            }
         }
     }
 
