@@ -24,6 +24,14 @@ public class Dstore {
         return controller;
     }
 
+    static synchronized BufferedReader getIN() {
+        return IN;
+    }
+
+    static synchronized  PrintWriter getOUT() {
+        return OUT;
+    }
+
     /**
      * Main method for running Dstore
      * @param args arguments given in command line, port is the main port for the client-Dstore connections. Cport is for the Dstore
@@ -54,17 +62,20 @@ public class Dstore {
                 System.out.println("controller socket closed after in and out made");
             }
             System.out.println("Attempting to join");
-            OUT.println("JOIN " + portText);
+            getOUT().println("JOIN " + portText);
             if(getController().isClosed()) {
                 System.out.println("controller socket closed after out.println");
             }
             System.out.println("join attempted");
 
-            //new Thread(new DstoreControllerThread()).start();
+            new Thread(new DstoreControllerThread()).start();
 
             while(true) {
                 try {
-                    new Thread(new DstoreThread(port.accept())).start();
+                    Socket c = port.accept();
+                    BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
+                    PrintWriter out = new PrintWriter(c.getOutputStream());
+                    new Thread(new DstoreThread(c,in,out)).start();
                     System.out.println("Client connected:");
                 } catch (Exception e) {
                     System.err.println("Socket Accept failed: ");
@@ -81,9 +92,9 @@ public class Dstore {
      * @param fileFolderTxt string of the storage location path
      * @param fileName name to save the file as
      */
-    public static void StoreFile(Socket client, String fileFolderTxt, String fileName) {
+    public static void StoreFile(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
         try {
-            System.out.println("Client Connected: " + client.getInetAddress().getHostAddress());
+            System.out.println("Client Connected for storage: " + client.getInetAddress().getHostAddress());
             InputStream inputStream = client.getInputStream();
             byte[] buffer = new byte[1024];
             int bytesRead;
@@ -94,12 +105,11 @@ public class Dstore {
                 fileOutputStream.write(buffer, 0, bytesRead);
             }
             fileOutputStream.close();
-            client.close();
 
-            System.out.println("File recieved and saved to: " + fileFolderTxt);
+            System.out.println("File received and saved to: " + fileFolderTxt);
 
-            PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
-            out.println("STORE_ACK");
+            getOUT().println("STORE_ACK " + fileName);
+            System.out.println("Storage Acknowledgement of file " + fileName + " sent to controller");
         } catch (Exception e) {
             System.err.println("error: " + e);
         }
@@ -110,9 +120,8 @@ public class Dstore {
      * "storeFile" function. Times out if the file data is not sent within the specified timeout time.
      * @param client socket that receives the message
      */
-    public static void ReceiveRequest(Socket client) {
+    public static void ReceiveRequest(Socket client, BufferedReader in, PrintWriter out) {
         try {
-            BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
             String line;
             while(!in.ready()) {
 
@@ -122,20 +131,20 @@ public class Dstore {
             switch (lines[0]) {
                 case "STORE" -> {
                     System.out.println("Storage request recieved:");
-                    PrintWriter out = new PrintWriter(client.getOutputStream(), true);
                     out.println("ACK");
+                    out.flush();
                     client.setSoTimeout(timeout);
                     try {
-                        StoreFile(client, fileFolderTxt, lines[1]);
+                        StoreFile(client, fileFolderTxt, lines[1], in, out);
                     } catch (Exception e) {
                         System.err.println("Timeout occurred. Closing connection");
-                        client.close();
                     }
                 }
                 case "LOAD_DATA" -> {
                     System.out.println("Load request received:");
                     loadFile(client, lines[1]);
                 }
+                default -> System.err.println("Malformed client message received, message was: " + lines[0]);
             }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
@@ -167,14 +176,11 @@ public class Dstore {
         String folderPath = fileFolderTxt + fileName;
         File file = new File(folderPath);
         try {
-            //PrintWriter out = new PrintWriter(getController().getOutputStream(), true);
             if(file.exists()) {
                 System.out.println("File deleted " + file.delete());
-                OUT.println("REMOVE_ACK " + fileName);
-                //OUT.close();
+                getOUT().println("REMOVE_ACK " + fileName);
             } else {
-                OUT.println("ERROR_FILE_DOES_NOT_EXIST");
-                //OUT.close();
+                getOUT().println("ERROR_FILE_DOES_NOT_EXIST " + fileName);
             }
         } catch(Exception e) {
             e.printStackTrace();
@@ -188,29 +194,36 @@ public class Dstore {
      */
     public static void loadFile(Socket client, String fileName) {
         String path = fileFolderTxt + fileName;
-        try {
-            byte[] fileBytes = Files.readAllBytes(Paths.get(path));
-            client.getOutputStream().write(fileBytes);
-            System.out.println("File data sent");
-        } catch (Exception e) {
-            System.err.println("Error: " + e);
+        if(new File(path).exists()) {
+            try {
+                byte[] fileBytes = Files.readAllBytes(Paths.get(path));
+                client.getOutputStream().write(fileBytes);
+                System.out.println("File data sent");
+            } catch (Exception e) {
+                System.err.println("Error: " + e);
+            }
+        } else {
+            try {
+                client.close();
+            } catch (Exception e) {
+                System.err.println("Socket could not be closed/was already closed: " + e);
+            }
         }
     }
 
 
     public static void listenController() {
         try {
-            while(true) {
-                System.out.println("created buffered reader");
-                String line;
-                System.out.println("about to read the line");
-                while(!IN.ready()) {
+            String input;
+            while((input = getIN().readLine()) != null) {
+                System.out.println("controller input is not null");
+                //while(!getIN().ready()) {
                     //System.out.println("in not ready in listenController");
                     //wait for IN to be ready
-                }
+                    //may not be required once the programs are set up to not close the input or output streams
+                //}
                 System.out.println("buffered reader is ready");
-                line = IN.readLine();
-                String[] lines = line.split(" ");
+                String[] lines = input.split(" ");
                 switch (lines[0]) {
                     case "LIST" -> {
 
@@ -222,6 +235,7 @@ public class Dstore {
                     case "REBALANCE" -> {
 
                     }
+                    default -> System.err.println("Malformed controller message received, message was: " + lines[0]);
                 }
             }
         } catch (Exception e) {
@@ -235,20 +249,24 @@ public class Dstore {
      */
     static class DstoreThread implements Runnable {
         Socket client;
+        BufferedReader in;
+        PrintWriter out;
 
         /**
          * Creates the thread, with the client socket
          * @param s the socket the client connects to
          */
-        DstoreThread(Socket s) {
-            client = s;
+        DstoreThread(Socket s, BufferedReader in, PrintWriter out) {
+            this.client = s;
+            this.in = in;
+            this.out = out;
         }
 
         /**
          * tries to run the method to receive a request
          */
         public void run() {
-            ReceiveRequest(client);
+            ReceiveRequest(client, in, out);
             try {
                 client.close();
             } catch (Exception e) {
