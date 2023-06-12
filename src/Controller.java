@@ -12,7 +12,7 @@ public class Controller {
     static Integer timeout;
     static Integer rebalancePeriod;
     static HashMap<String, FileIndex> Index = new HashMap<>();
-    static HashMap<String, Socket> DstoreList = new HashMap<>();
+    static HashMap<String, DStoreI> DstoreList = new HashMap<>();
     static ThreadLocal<Integer> indexToStore = new ThreadLocal<>();
 
     public static void setIndexToStore(int value) {
@@ -63,15 +63,19 @@ public class Controller {
         return Index;
     }
 
-    public static synchronized void addToDstoreList(String s, Socket c)  {
-        DstoreList.put(s,c);
+    public static synchronized void addToDstoreList(String s, DStoreI store)  {
+        DstoreList.put(s,store);
     }
 
     public static synchronized Socket getDstore(String s) {
+        return DstoreList.get(s).getSocket();
+    }
+
+    public static synchronized DStoreI getDstoreI(String s) {
         return DstoreList.get(s);
     }
 
-    public static synchronized HashMap<String, Socket> getDstoreList() {
+    public static synchronized HashMap<String, DStoreI> getDstoreList() {
         return DstoreList;
     }
 
@@ -118,12 +122,13 @@ public class Controller {
                         //if(c.isClosed()) {
                         //    System.out.println("socket closed before adding to dstorelist");
                         //}
-                        addToDstoreList(lines[1], c);
+                        DStoreI store = new DStoreI(c, in, out);
+                        addToDstoreList(lines[1], store);
                         //if(c.isClosed()) {
                         //    System.out.println("socket closed after adding to dstorelist");
                         //}
                         //re-balance could go here?
-                        recieveDstoreMsg(c, in, out);
+                        recieveDstoreMsg(store);
                     }
 
                     case "STORE" -> {
@@ -232,8 +237,9 @@ public class Controller {
                                         updateIndexStatus(fileName, "remove in progress");
                                         List<String> DstoresWFile = getIndexFile(fileName).getDstoreAllocation();
                                         for(String s : DstoresWFile) {
-                                            PrintWriter out1 = new PrintWriter(getDstore(s).getOutputStream(), true);
+                                            PrintWriter out1 = getDstoreI(s).getOut();
                                             out1.println("REMOVE " + fileName);
+                                            out1.flush();
                                         }
                                     } else {
                                         System.err.println("File requested to be removed was not a fully stored file");
@@ -297,14 +303,13 @@ public class Controller {
         }
     }
 
-    public static void recieveDstoreMsg(Socket c, BufferedReader in, PrintWriter out) {
+    public static void recieveDstoreMsg(DStoreI store) {
         try {
             String input;
+            BufferedReader in = store.getIn();
+            PrintWriter out = store.getOut();
+            Socket c = store.getSocket();
             while((input = in.readLine()) != null) {
-                if(c.isClosed()) {
-                    System.err.println("socket is closed in recieveDstoreMsg");
-                    break;
-                }
                 String[] lines = input.split(" ");
                 switch(lines[0]) {
                     case "STORE_ACK", "REMOVE_ACK" -> {
@@ -480,27 +485,27 @@ public class Controller {
             this.out = out;
         }
 
-        public Socket getSocket() {
+        public synchronized Socket getSocket() {
             return this.c;
         }
 
-        public void setSocket(Socket c) {
+        public synchronized void setSocket(Socket c) {
             this.c = c;
         }
 
-        public BufferedReader getIn() {
+        public synchronized BufferedReader getIn() {
             return this.in;
         }
 
-        public void setIn(BufferedReader in) {
+        public synchronized void setIn(BufferedReader in) {
             this.in = in;
         }
 
-        public PrintWriter getOut() {
+        public synchronized PrintWriter getOut() {
             return this.out;
         }
 
-        public void setOut(PrintWriter out) {
+        public synchronized void setOut(PrintWriter out) {
             this.out = out;
         }
     }
