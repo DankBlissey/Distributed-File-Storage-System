@@ -123,9 +123,6 @@ public class Dstore {
     public static void ReceiveRequest(Socket client, BufferedReader in, PrintWriter out) {
         try {
             String line;
-            while(!in.ready()) {
-
-            }
             line = in.readLine();
             String[] lines = line.split(" ");
             switch (lines[0]) {
