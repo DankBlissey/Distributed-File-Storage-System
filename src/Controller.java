@@ -108,95 +108,79 @@ public class Controller {
     public static void receive(Socket c, BufferedReader in, PrintWriter out) {
         try {
             System.out.println("Reading line");
-            String line = in.readLine();
-            System.out.println("Line read");
-            String[] lines = line.split(" ");
-            switch (lines[0]) {
-                case "JOIN" -> {
-                    System.out.println("Dstore connected with port " + lines[1]);
-                    //if(c.isClosed()) {
-                    //    System.out.println("socket closed before adding to dstorelist");
-                    //}
-                    addToDstoreList(lines[1], c);
-                    //if(c.isClosed()) {
-                    //    System.out.println("socket closed after adding to dstorelist");
-                    //}
-                    //re-balance could go here?
-                    recieveDstoreMsg(c, in, out);
-                }
+            String line;
+            while((line = in.readLine()) != null) {
+                System.out.println("Line read");
+                String[] lines = line.split(" ");
+                switch (lines[0]) {
+                    case "JOIN" -> {
+                        System.out.println("Dstore connected with port " + lines[1]);
+                        //if(c.isClosed()) {
+                        //    System.out.println("socket closed before adding to dstorelist");
+                        //}
+                        addToDstoreList(lines[1], c);
+                        //if(c.isClosed()) {
+                        //    System.out.println("socket closed after adding to dstorelist");
+                        //}
+                        //re-balance could go here?
+                        recieveDstoreMsg(c, in, out);
+                    }
 
-                case "STORE" -> {
-                    System.out.println("Client store request");
-                    synchronized (Controller.class) {
-                        if (getDstoreList().size() >= R) {
-                            if (!isFileInIndex(lines[1])) {
-                                List<String> Dgo = selectDstores();
-                                String fileName = lines[1];
-                                Integer fileSize = Integer.parseInt(lines[2]);
-                                addToIndex(new FileIndex(fileName, fileSize, Dgo));
-                                allocateDstores(c, Dgo, in, out);
+                    case "STORE" -> {
+                        System.out.println("Client store request");
+                        synchronized (Controller.class) {
+                            if (getDstoreList().size() >= R) {
+                                if (!isFileInIndex(lines[1])) {
+                                    List<String> Dgo = selectDstores();
+                                    String fileName = lines[1];
+                                    Integer fileSize = Integer.parseInt(lines[2]);
+                                    System.out.println("Adding file " + fileName + " to index");
+                                    addToIndex(new FileIndex(fileName, fileSize, Dgo));
+                                    System.out.println("allocating Dstores for " + fileName);
+                                    allocateDstores(c, Dgo, in, out);
+                                } else {
+                                    System.err.println("Error with storage request: file already exists");
+                                    out.println("ERROR_FILE_ALREADY_EXISTS");
+                                    out.flush();
+                                    break;
+                                    //c.close();
+                                }
                             } else {
-                                System.err.println("Error with storage request: file already exists");
-                                out.println("ERROR_FILE_ALREADY_EXISTS");
+                                System.err.println("Error with storage request: not enough Dstores");
+                                out.println("ERROR_NOT_ENOUGH_DSTORES");
                                 out.flush();
+                                break;
                                 //c.close();
                             }
-                        } else {
-                            System.err.println("Error with storage request: not enough Dstores");
-                            out.println("ERROR_NOT_ENOUGH_DSTORES");
-                            out.flush();
-                            //c.close();
                         }
-                    }
-                    String fileName = lines[1];
-                    try {
-                        Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
-                        if(acknow.equals(true)) {
-                            updateIndexStatus(fileName, "store complete");
-                            out.println("STORE_COMPLETE");
-                            out.flush();
-                            setLatch(fileName, R);
-                            //c.close();
-                        } else {
+                        String fileName = lines[1];
+                        try {
+                            Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
+                            if(acknow.equals(true)) {
+                                updateIndexStatus(fileName, "store complete");
+                                out.println("STORE_COMPLETE");
+                                out.flush();
+                                System.out.println(getIndex());
+                                setLatch(fileName, R);
+                                //c.close();
+                            } else {
+                                removeFromIndex(fileName);
+                                //c.close();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
                             removeFromIndex(fileName);
                             //c.close();
                         }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        removeFromIndex(fileName);
-                        //c.close();
                     }
-                }
-                case "LOAD" -> {
-                    setIndexToStore(0);
-                    String fileName = lines[1];
-                    FileIndex file = new FileIndex(getIndexFile(fileName));
-                    List<String> dstores = file.getDstoreAllocation();
-                    if(!dstores.isEmpty()) {
-                        if(getDstoreList().size() >= R) {
-                            out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
-                            out.flush();
-                            receive(c,in,out);
-                        } else {
-                            out.println("ERROR_NOT_ENOUGH_DSTORES");
-                            out.flush();
-                            //c.close();
-                        }
-                    } else {
-                        out.println("ERROR_FILE_DOES_NOT_EXIST");
-                        out.flush();
-                        //c.close();
-                    }
-                }
-                case "RELOAD" -> {
-                    setIndexToStore(getIndexToStore()+1);
-                    String fileName = lines[1];
-                    FileIndex file = new FileIndex(getIndexFile(fileName));
-                    List<String> dstores = file.getDstoreAllocation();
-                    if(dstores.size() > getIndexToStore()) {
+                    case "LOAD" -> {
+                        setIndexToStore(0);
+                        String fileName = lines[1];
+                        FileIndex file = new FileIndex(getIndexFile(fileName));
+                        List<String> dstores = file.getDstoreAllocation();
                         if(!dstores.isEmpty()) {
                             if(getDstoreList().size() >= R) {
-                                out.println("LOAD_FROM " + dstores.get(getIndexToStore()) + " " + file.getFileSize().toString());
+                                out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
                                 out.flush();
                                 receive(c,in,out);
                             } else {
@@ -209,28 +193,22 @@ public class Controller {
                             out.flush();
                             //c.close();
                         }
-                    } else {
-                        out.println("ERROR_LOAD");
-                        out.flush();
-                        //c.close();
                     }
-
-                }
-                case "REMOVE" -> {
-                    System.out.println("client remove request: ");
-                    String fileName = lines[1];
-                    synchronized (Controller.class) {
-                        if (getDstoreList().size() >= R) {
-                            if (isFileInIndex(lines[1])) {
-                                if (getIndexFile(fileName).getStatus().equals("store complete")) {
-                                    updateIndexStatus(fileName, "remove in progress");
-                                    List<String> DstoresWFile = getIndexFile(fileName).getDstoreAllocation();
-                                    for(String s : DstoresWFile) {
-                                        PrintWriter out1 = new PrintWriter(getDstore(s).getOutputStream(), true);
-                                        out1.println("REMOVE " + fileName);
-                                    }
+                    case "RELOAD" -> {
+                        setIndexToStore(getIndexToStore()+1);
+                        String fileName = lines[1];
+                        FileIndex file = new FileIndex(getIndexFile(fileName));
+                        List<String> dstores = file.getDstoreAllocation();
+                        if(dstores.size() > getIndexToStore()) {
+                            if(!dstores.isEmpty()) {
+                                if(getDstoreList().size() >= R) {
+                                    out.println("LOAD_FROM " + dstores.get(getIndexToStore()) + " " + file.getFileSize().toString());
+                                    out.flush();
+                                    receive(c,in,out);
                                 } else {
-                                    System.err.println("File requested to be removed was not a fully stored file");
+                                    out.println("ERROR_NOT_ENOUGH_DSTORES");
+                                    out.flush();
+                                    //c.close();
                                 }
                             } else {
                                 out.println("ERROR_FILE_DOES_NOT_EXIST");
@@ -238,47 +216,82 @@ public class Controller {
                                 //c.close();
                             }
                         } else {
+                            out.println("ERROR_LOAD");
+                            out.flush();
+                            //c.close();
+                        }
+
+                    }
+                    case "REMOVE" -> {
+                        System.out.println("client remove request: ");
+                        String fileName = lines[1];
+                        synchronized (Controller.class) {
+                            if (getDstoreList().size() >= R) {
+                                if (isFileInIndex(lines[1])) {
+                                    if (getIndexFile(fileName).getStatus().equals("store complete")) {
+                                        updateIndexStatus(fileName, "remove in progress");
+                                        List<String> DstoresWFile = getIndexFile(fileName).getDstoreAllocation();
+                                        for(String s : DstoresWFile) {
+                                            PrintWriter out1 = new PrintWriter(getDstore(s).getOutputStream(), true);
+                                            out1.println("REMOVE " + fileName);
+                                        }
+                                    } else {
+                                        System.err.println("File requested to be removed was not a fully stored file");
+                                        break;
+                                    }
+                                } else {
+                                    out.println("ERROR_FILE_DOES_NOT_EXIST");
+                                    out.flush();
+                                    break;
+                                    //c.close();
+                                }
+                            } else {
+                                out.println("ERROR_NOT_ENOUGH_DSTORES");
+                                out.flush();
+                                break;
+                                //c.close();
+                            }
+                        }
+                        try {
+                            Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
+                            if(acknow.equals(true)) {
+                                updateIndexStatus(fileName, "remove complete");
+                                out.println("REMOVE_COMPLETE");
+                                //c.close();
+                            } else {
+                                System.err.println("timeout with receiving acknowledgement of removal");
+                                //c.close();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            //c.close();
+                        }
+                    }
+                    case "LIST" -> {
+                        if(getDstoreList().size() >= R) {
+                            ArrayList<FileIndex> index = new ArrayList<>(getIndexFiles());
+                            if(!index.isEmpty()) {
+                                out.print("LIST");
+                                for (FileIndex f : index) {
+                                    out.print(" " + f.getFileName());
+                                }
+                                out.println("");
+                                out.flush();
+                            } else {
+                                out.println("LIST ");
+                                out.flush();
+                            }
+                        } else {
                             out.println("ERROR_NOT_ENOUGH_DSTORES");
                             out.flush();
                             //c.close();
                         }
                     }
-                    try {
-                        Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
-                        if(acknow.equals(true)) {
-                            updateIndexStatus(fileName, "remove complete");
-                            out.println("REMOVE_COMPLETE");
-                            //c.close();
-                        } else {
-                            System.err.println("timeout with receiving acknowledgement of removal");
-                            //c.close();
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        //c.close();
-                    }
+                    default -> System.err.println("Malformed client/Dstore message received, message was: " + lines[0]);
                 }
-                case "LIST" -> {
-                    if(getDstoreList().size() >= R) {
-                        ArrayList<FileIndex> index = new ArrayList<>(getIndexFiles());
-                        if(!index.isEmpty()) {
-                            out.print("LIST");
-                            for (FileIndex f : index) {
-                                out.print(" " + f.getFileName());
-                            }
-                            out.flush();
-                        } else {
-                            out.println("LIST ");
-                            out.flush();
-                        }
-                    } else {
-                        out.println("ERROR_NOT_ENOUGH_DSTORES");
-                        out.flush();
-                        //c.close();
-                    }
-                }
-                default -> System.err.println("Malformed client/Dstore message received, message was: " + lines[0]);
             }
+            System.err.println("Receive is null, attempting to close socket for safety");
+            c.close();
         } catch (Exception e) {
             System.err.println("Error: " + e);
         }
@@ -312,6 +325,7 @@ public class Controller {
                     default -> System.err.println("Malformed Dstore message received, message was: " + lines[0]);
                 }
             }
+            System.err.println("Dstore at port " + c.getPort() + "is returning null");
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -370,10 +384,8 @@ public class Controller {
         }
 
         public void run() {
-            while(!connector.isClosed()) {
                 setIndexToStore(0);
                 receive(connector, in, out);
-            }
         }
     }
 
@@ -453,6 +465,43 @@ public class Controller {
 
         public String getStatus() {
             return this.status;
+        }
+    }
+
+    public static class DStoreI {
+        Socket c;
+        BufferedReader in;
+        PrintWriter out;
+
+
+        DStoreI(Socket c, BufferedReader in, PrintWriter out) {
+            this.c = c;
+            this.in = in;
+            this.out = out;
+        }
+
+        public Socket getSocket() {
+            return this.c;
+        }
+
+        public void setSocket(Socket c) {
+            this.c = c;
+        }
+
+        public BufferedReader getIn() {
+            return this.in;
+        }
+
+        public void setIn(BufferedReader in) {
+            this.in = in;
+        }
+
+        public PrintWriter getOut() {
+            return this.out;
+        }
+
+        public void setOut(PrintWriter out) {
+            this.out = out;
         }
     }
 }
