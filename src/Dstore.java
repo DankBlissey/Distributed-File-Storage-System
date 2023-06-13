@@ -3,9 +3,7 @@ import java.net.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Objects;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
 
 /**
  * Dstore class for storing files sent by client
@@ -223,7 +221,18 @@ public class Dstore {
                 String[] lines = input.split(" ");
                 switch (lines[0]) {
                     case "LIST" -> {
-
+                        File location = new File(fileFolderTxt);
+                        File[] fileList = location.listFiles();
+                        synchronized (Dstore.class) {
+                            getOUT().print("LIST");
+                            getOUT().flush();
+                            assert fileList != null : "no files to list";
+                            for(File x : fileList) {
+                                getOUT().print(" " + x.getName());
+                            }
+                            getOUT().println("");
+                            getOUT().flush();
+                        }
                     }
                     case "REMOVE" -> {
                         String fileName = lines[1];

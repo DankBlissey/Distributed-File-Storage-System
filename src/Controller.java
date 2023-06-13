@@ -127,7 +127,7 @@ public class Controller {
                         //if(c.isClosed()) {
                         //    System.out.println("socket closed after adding to dstorelist");
                         //}
-                        //re-balance could go here?
+                        rebalance();
                         recieveDstoreMsg(store);
                     }
 
@@ -311,6 +311,10 @@ public class Controller {
         } catch (Exception e) {
             System.err.println("Error: " + e);
         }
+    }
+
+    public static void rebalance() {
+
     }
 
     public static void recieveDstoreMsg(DStoreI store) {
