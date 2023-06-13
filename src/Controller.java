@@ -136,6 +136,7 @@ public class Controller {
                         synchronized (Controller.class) {
                             if (getDstoreList().size() >= R) {
                                 if (!isFileInIndex(lines[1])) {
+                                    System.out.println("selecting Dstores");
                                     List<String> Dgo = selectDstores();
                                     String fileName = lines[1];
                                     Integer fileSize = Integer.parseInt(lines[2]);
@@ -181,22 +182,27 @@ public class Controller {
                     case "LOAD" -> {
                         setIndexToStore(0);
                         String fileName = lines[1];
-                        FileIndex file = new FileIndex(getIndexFile(fileName));
-                        List<String> dstores = file.getDstoreAllocation();
-                        if(!dstores.isEmpty()) {
-                            if(getDstoreList().size() >= R) {
-                                out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
-                                out.flush();
-                                receive(c,in,out);
+                        FileIndex file;
+                        if((file = getIndexFile(fileName)) != null) {
+                            List<String> dstores = file.getDstoreAllocation();
+                            if(!dstores.isEmpty() || file.getStatus().equals("store complete")) {
+                                if(getDstoreList().size() >= R) {
+                                    out.println("LOAD_FROM " + dstores.get(0) + " " + file.getFileSize().toString());
+                                    out.flush();
+                                    receive(c,in,out);
+                                } else {
+                                    out.println("ERROR_NOT_ENOUGH_DSTORES");
+                                    out.flush();
+                                    //c.close();
+                                }
                             } else {
-                                out.println("ERROR_NOT_ENOUGH_DSTORES");
+                                out.println("ERROR_FILE_DOES_NOT_EXIST");
                                 out.flush();
                                 //c.close();
                             }
                         } else {
                             out.println("ERROR_FILE_DOES_NOT_EXIST");
                             out.flush();
-                            //c.close();
                         }
                     }
                     case "RELOAD" -> {
@@ -205,7 +211,7 @@ public class Controller {
                         FileIndex file = new FileIndex(getIndexFile(fileName));
                         List<String> dstores = file.getDstoreAllocation();
                         if(dstores.size() > getIndexToStore()) {
-                            if(!dstores.isEmpty()) {
+                            if(!dstores.isEmpty() || file.getStatus().equals("store complete")) {
                                 if(getDstoreList().size() >= R) {
                                     out.println("LOAD_FROM " + dstores.get(getIndexToStore()) + " " + file.getFileSize().toString());
                                     out.flush();
@@ -242,6 +248,7 @@ public class Controller {
                                             out1.flush();
                                         }
                                     } else {
+                                        out.println("ERROR_FILE_DOES_NOT_EXIST");
                                         System.err.println("File requested to be removed was not a fully stored file");
                                         break;
                                     }
@@ -263,6 +270,7 @@ public class Controller {
                             if(acknow.equals(true)) {
                                 updateIndexStatus(fileName, "remove complete");
                                 out.println("REMOVE_COMPLETE");
+                                out.flush();
                                 //c.close();
                             } else {
                                 System.err.println("timeout with receiving acknowledgement of removal");
@@ -279,7 +287,9 @@ public class Controller {
                             if(!index.isEmpty()) {
                                 out.print("LIST");
                                 for (FileIndex f : index) {
-                                    out.print(" " + f.getFileName());
+                                    if(f.getStatus().equals("store complete")) {
+                                        out.print(" " + f.getFileName());
+                                    }
                                 }
                                 out.println("");
                                 out.flush();
@@ -354,12 +364,13 @@ public class Controller {
     public static synchronized List<String> selectDstores() {
         List<String> Dstores;
         List<String> DstoresWithFiles;
+        System.out.println("getting list of All dstores");
         Dstores = new ArrayList<>(getDstoreList().keySet());
+        System.out.println("getting dstore locations in order of least files");
         DstoresWithFiles = getLocationsWithLeastFiles();
         Dstores.removeAll(DstoresWithFiles);
-        int n = R - Dstores.size();
-        Dstores.addAll(DstoresWithFiles.subList(0, Math.min(n, DstoresWithFiles.size())));
-        return Dstores;
+        DstoresWithFiles.addAll(0, Dstores);
+        return DstoresWithFiles.subList(0, Math.min(R,DstoresWithFiles.size()));
     }
 
     public static synchronized List<String> getLocationsWithLeastFiles() {
