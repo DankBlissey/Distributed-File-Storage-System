@@ -14,6 +14,7 @@ public class Controller {
     static HashMap<String, FileIndex> Index = new HashMap<>();
     static HashMap<String, DStoreI> DstoreList = new HashMap<>();
     static ThreadLocal<Integer> indexToStore = new ThreadLocal<>();
+    static final Object rebalanceObj = new Object();
 
     public static void setIndexToStore(int value) {
         indexToStore.set(value);
@@ -90,6 +91,7 @@ public class Controller {
             timeout = Integer.parseInt(args[2]);
             rebalancePeriod = Integer.parseInt(args[3]);
             System.out.println("Starting");
+            new Thread(new RebalanceThread()).start();
 
             while(true) {
                 try {
@@ -127,7 +129,9 @@ public class Controller {
                         //if(c.isClosed()) {
                         //    System.out.println("socket closed after adding to dstorelist");
                         //}
-                        rebalance();
+                        synchronized (rebalanceObj) {
+                            rebalanceObj.notify();
+                        }
                         recieveDstoreMsg(store);
                     }
 
@@ -166,7 +170,6 @@ public class Controller {
                                 updateIndexStatus(fileName, "store complete");
                                 out.println("STORE_COMPLETE");
                                 out.flush();
-                                System.out.println(getIndex());
                                 setLatch(fileName, R);
                                 //c.close();
                             } else {
@@ -271,6 +274,7 @@ public class Controller {
                                 updateIndexStatus(fileName, "remove complete");
                                 out.println("REMOVE_COMPLETE");
                                 out.flush();
+                                setLatch(fileName, R);
                                 //c.close();
                             } else {
                                 System.err.println("timeout with receiving acknowledgement of removal");
@@ -313,7 +317,16 @@ public class Controller {
         }
     }
 
-    public static void rebalance() {
+    public static synchronized void rebalance() {
+        for(DStoreI d : getDstoreList().values()) {
+            d.getOut().println("LIST");
+            d.getOut().flush();
+        }
+        /*
+        sort Dstores based on how many files they have in them, then take Dstores from the ends of the list and have them transfer a file from the biggest to the smallest,
+        each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
+        full dstore have 0-1 number of files between them.
+         */
 
     }
 
@@ -332,7 +345,7 @@ public class Controller {
                         countdownIndex(fileName);
                     }
                     case "LIST" -> {
-                        //stuff to do with re-balancing
+
                     }
                     case "REBALANCE_COMPLETE" -> {
                         //other stuff
@@ -406,6 +419,24 @@ public class Controller {
         public void run() {
                 setIndexToStore(0);
                 receive(connector, in, out);
+        }
+    }
+
+    static class RebalanceThread implements  Runnable {
+
+        RebalanceThread() {
+
+        }
+
+        public void run() {
+            synchronized (rebalanceObj) {
+                try {
+                    rebalanceObj.wait(rebalancePeriod.longValue());
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            rebalance();
         }
     }
 
