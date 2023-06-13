@@ -323,11 +323,10 @@ public class Controller {
             d.getOut().flush();
         }
         /*
-        sort Dstores based on how many files they have in them, then take Dstores from the ends of the list and have them transfer a file from the biggest to the smallest,
+        sort Dstores based on how much data they have in them, then take Dstores from the ends of the list and have them transfer a file from the biggest to the smallest,
         each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
         full dstore have 0-1 number of files between them.
          */
-
     }
 
     public static void recieveDstoreMsg(DStoreI store) {
@@ -429,14 +428,16 @@ public class Controller {
         }
 
         public void run() {
-            synchronized (rebalanceObj) {
-                try {
-                    rebalanceObj.wait(rebalancePeriod.longValue());
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+            while(true) {
+                synchronized (rebalanceObj) {
+                    try {
+                        rebalanceObj.wait(rebalancePeriod.longValue());
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
+                rebalance();
             }
-            rebalance();
         }
     }
 
