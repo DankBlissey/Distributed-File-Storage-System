@@ -323,7 +323,7 @@ public class Controller {
             d.getOut().flush();
         }
         /*
-        sort Dstores based on how much data they have in them, then take Dstores from the ends of the list and have them transfer a file from the biggest to the smallest,
+        sort Dstores based on how many files they have in them, then take Dstores from the ends of the list and have them transfer a file from the biggest to the smallest,
         each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
         full dstore have 0-1 number of files between them.
          */
@@ -385,8 +385,24 @@ public class Controller {
         System.out.println("getting dstore locations in order of least files");
         DstoresWithFiles = getLocationsWithLeastFiles();
         Dstores.removeAll(DstoresWithFiles);
+        Dstores.addAll(DstoresWithFiles);
+        return Dstores.subList(0, Math.min(R,Dstores.size()));
+        //DstoresWithFiles.addAll(0, Dstores);
+        //return DstoresWithFiles.subList(0, Math.min(R,DstoresWithFiles.size()));
+        //original fix for selecting Dstores, not as efficient as inserting all is O(n+m)
+    }
+
+    public static synchronized List<String> getDstoresInOrder() {
+        List<String> Dstores;
+        List<String> DstoresWithFiles;
+        System.out.println("getting list of All dstores");
+        Dstores = new ArrayList<>(getDstoreList().keySet());
+        System.out.println("getting dstore locations in order of least files");
+        DstoresWithFiles = getLocationsWithLeastFiles();
+        Dstores.removeAll(DstoresWithFiles);
+        Dstores.addAll(DstoresWithFiles);
         DstoresWithFiles.addAll(0, Dstores);
-        return DstoresWithFiles.subList(0, Math.min(R,DstoresWithFiles.size()));
+        return DstoresWithFiles;
     }
 
     public static synchronized List<String> getLocationsWithLeastFiles() {
