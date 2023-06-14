@@ -15,6 +15,32 @@ public class Controller {
     static HashMap<String, DStoreI> DstoreList = new HashMap<>();
     static ThreadLocal<Integer> indexToStore = new ThreadLocal<>();
     static final Object rebalanceObj = new Object();
+    static List<DstoreFileList> rebalanceDstoreFiles = new ArrayList<>();
+    static CountDownLatch rebalanceCd;
+
+    public static synchronized CountDownLatch getRebalanceCountDownLatch() {
+        return rebalanceCd;
+    }
+
+    public static synchronized void setRebalanceCountDownLatch(int i) {
+        rebalanceCd = new CountDownLatch(i);
+    }
+
+    public static synchronized void countDownRebalance() {
+        getRebalanceCountDownLatch().countDown();
+    }
+
+    public static synchronized void addRebalanceDstoreFiles(DstoreFileList s) {
+        rebalanceDstoreFiles.add(s);
+    }
+
+    public static synchronized void wipeRebalanceDstoreFiles() {
+        rebalanceDstoreFiles = new ArrayList<>();
+    }
+
+    public static synchronized List<DstoreFileList> getRebalanceDstoreFiles() {
+        return rebalanceDstoreFiles;
+    }
 
     public static void setIndexToStore(int value) {
         indexToStore.set(value);
@@ -139,7 +165,7 @@ public class Controller {
                         System.out.println("Client store request");
                         synchronized (Controller.class) {
                             if (getDstoreList().size() >= R) {
-                                if (!isFileInIndex(lines[1])) {
+                                if ((!isFileInIndex(lines[1])) || ((isFileInIndex(lines[1])) && (getIndex().get(lines[1]).getStatus().equals("remove complete")))) {
                                     System.out.println("selecting Dstores");
                                     List<String> Dgo = selectDstores();
                                     String fileName = lines[1];
@@ -318,10 +344,23 @@ public class Controller {
     }
 
     public static synchronized void rebalance() {
+        setRebalanceCountDownLatch(getDstoreList().size());
         for(DStoreI d : getDstoreList().values()) {
             d.getOut().println("LIST");
             d.getOut().flush();
         }
+        try {
+            Boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
+            if(listed = true) {
+
+            } else {
+                System.err.println("");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+
         /*
         sort Dstores based on how many files they have in them, then take Dstores from the ends of the list and have them transfer a file from the biggest to the smallest,
         each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
@@ -339,12 +378,21 @@ public class Controller {
                 String[] lines = input.split(" ");
                 switch(lines[0]) {
                     case "STORE_ACK", "REMOVE_ACK" -> {
-                        System.out.println("Acknowledgement recieved");
+                        System.out.println("Acknowledgement received");
                         String fileName = lines[1];
                         countdownIndex(fileName);
                     }
                     case "LIST" -> {
-
+                        System.out.println("Dstore List reply received");
+                        String portName = Integer.toString(c.getPort());
+                        if(lines.length == 1) {
+                            addRebalanceDstoreFiles(new DstoreFileList(portName, new ArrayList<>()));
+                        } else {
+                            List<String> files = new ArrayList<>(Arrays.asList(lines).subList(1,lines.length));
+                            addRebalanceDstoreFiles(new DstoreFileList(portName,files));
+                        }
+                        countDownRebalance();
+                        System.out.println("Dstore list for " + portName + " added to the rebalance file list");
                     }
                     case "REBALANCE_COMPLETE" -> {
                         //other stuff
@@ -401,8 +449,12 @@ public class Controller {
         DstoresWithFiles = getLocationsWithLeastFiles();
         Dstores.removeAll(DstoresWithFiles);
         Dstores.addAll(DstoresWithFiles);
-        DstoresWithFiles.addAll(0, Dstores);
-        return DstoresWithFiles;
+        return Dstores;
+    }
+
+    public static synchronized List<DstoreFileList> sortRebalanceList() {
+        List<DstoreFileList> start = getRebalanceDstoreFiles();
+        return null;
     }
 
     public static synchronized List<String> getLocationsWithLeastFiles() {
@@ -412,6 +464,7 @@ public class Controller {
             List<String> locations = entry.getDstoreAllocation();
             for (String location : locations) {
                 storageCounts.put(location, storageCounts.getOrDefault(location, 0) + entry.getFileSize());
+                //might change entry.getFileSize() to 1 depending on if Dstores are to be allocated by amount of data or number of files stored.
             }
         }
         List<String> sortedLocations = new ArrayList<>(storageCounts.keySet());
@@ -508,6 +561,10 @@ public class Controller {
             this.DstoreAllocation.set(index, port);
         }
 
+        public void setAllDstoreAllocation(List<String> allocation) {
+            this.DstoreAllocation = allocation;
+        }
+
         public void addDstoreToAllocation(String port) {
             this.DstoreAllocation.add(port);
         }
@@ -570,6 +627,16 @@ public class Controller {
 
         public synchronized void setOut(PrintWriter out) {
             this.out = out;
+        }
+    }
+
+    public static class DstoreFileList {
+        String port;
+        List<String> files;
+
+        DstoreFileList(String port, List<String> files) {
+            this.port = port;
+            this.files = files;
         }
     }
 }

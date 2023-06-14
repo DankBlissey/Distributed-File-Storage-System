@@ -53,6 +53,10 @@ public class FileIndex {
         this.DstoreAllocation.set(index, port);
     }
 
+    public void setAllDstoreAllocation(List<String> allocation) {
+        this.DstoreAllocation = allocation;
+    }
+
     public void addDstoreToAllocation(String port) {
         this.DstoreAllocation.add(port);
     }
