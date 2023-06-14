@@ -350,11 +350,12 @@ public class Controller {
             d.getOut().flush();
         }
         try {
-            Boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
-            if(listed = true) {
-
+            boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
+            if(listed) {
+                List<DstoreFileList> list = getRebalanceDstoreFiles();
+                sortRebalanceList(list);
             } else {
-                System.err.println("");
+                System.err.println("Not all list replies received");
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -452,9 +453,8 @@ public class Controller {
         return Dstores;
     }
 
-    public static synchronized List<DstoreFileList> sortRebalanceList() {
-        List<DstoreFileList> start = getRebalanceDstoreFiles();
-        return null;
+    public static synchronized void sortRebalanceList(List<DstoreFileList> start) {
+        start.sort(Comparator.comparingInt(obj -> obj.getFiles().size()));
     }
 
     public static synchronized List<String> getLocationsWithLeastFiles() {
@@ -463,8 +463,7 @@ public class Controller {
         for (FileIndex entry : index) {
             List<String> locations = entry.getDstoreAllocation();
             for (String location : locations) {
-                storageCounts.put(location, storageCounts.getOrDefault(location, 0) + entry.getFileSize());
-                //might change entry.getFileSize() to 1 depending on if Dstores are to be allocated by amount of data or number of files stored.
+                storageCounts.put(location, storageCounts.getOrDefault(location, 0) + 1);
             }
         }
         List<String> sortedLocations = new ArrayList<>(storageCounts.keySet());
@@ -637,6 +636,22 @@ public class Controller {
         DstoreFileList(String port, List<String> files) {
             this.port = port;
             this.files = files;
+        }
+
+        public synchronized void setPort(String port) {
+            this.port = port;
+        }
+
+        public synchronized String getPort() {
+            return this.port;
+        }
+
+        public synchronized void setFiles(List<String> files) {
+            this.files = files;
+        }
+
+        public synchronized List<String> getFiles() {
+            return this.files;
         }
     }
 }
