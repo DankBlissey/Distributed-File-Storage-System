@@ -239,7 +239,28 @@ public class Dstore {
                         removeFile(fileName);
                     }
                     case "REBALANCE" -> {
-
+                        int index = 1;
+                        int filesSent = Integer.parseInt(lines[index]);
+                        HashMap<String, List<String>> filesToSend = new HashMap<>();
+                        List<String> filesToRemove = new ArrayList<>();
+                        for(int numberOfFilesSent = filesSent; numberOfFilesSent > 0; numberOfFilesSent--) {
+                            index++;
+                            String fileName = lines[index];
+                            List<String> dstoresToSendList = new ArrayList<>();
+                            index++;
+                            int dstoreToSend = Integer.parseInt(lines[index]);
+                            for(int numberOfDstoresToSend = dstoreToSend; numberOfDstoresToSend > 0; numberOfDstoresToSend--) {
+                                index++;
+                                dstoresToSendList.add(lines[index]);
+                            }
+                            filesToSend.put(fileName, dstoresToSendList);
+                        }
+                        index++;
+                        int removesSent = Integer.parseInt(lines[index]);
+                        for(int numberOfRemovesSent = removesSent; numberOfRemovesSent > 0; numberOfRemovesSent--) {
+                            index++;
+                            filesToRemove.add(lines[index]);
+                        }
                     }
                     default -> System.err.println("Malformed controller message received, message was: " + lines[0]);
                 }

@@ -375,7 +375,7 @@ public class Controller {
                 List<DstoreFileList> list = getRebalanceDstoreFiles();
                 sortRebalanceList(list);
 
-                //all of this should make sure files that are not in the index are removed from Dstores and files in the Index that no Dstore contains get removed from the index
+                //this should make sure files that are not in the index are removed from Dstores and files in the Index that no Dstore contains get removed from the index
                 for(DstoreFileList d : getRebalanceDstoreFiles()) {
                     for(String file : d.getFiles()) {
                         if((!isFileInIndex(file)) || ((isFileInIndex(file)) && !Index.get(file).getStatus().equals("store complete"))) {
@@ -384,34 +384,36 @@ public class Controller {
                     }
                     d.getFiles().removeAll(d.getFilesToRemove());
                 }
+
                 List<FileIndex> files = new ArrayList<>(getIndexFiles());
+
+
                 for(FileIndex f : files) {
                     List<String> actual = new ArrayList<>(f.getDstoresCorrectlyStoring());
                     List<String> ideal = new ArrayList<>(f.getDstoreAllocation());
+                    //removes the file if it was not stored by any Dstore
                     if(f.getCountDownLatch().getCount() == R) {
                         getIndex().remove(f.getFileName());
                     } else if(!actual.containsAll(ideal)){
+                        //this bit removes from the Index Dstores allocated to a file that do not actually contain it
                         ideal.removeAll(actual);
-                        f.getDstoreAllocation().removeAll(ideal);
+                        getIndexDstores(f.getFileName()).removeAll(ideal);
                     }
+
+                    //this bit ensures that all files are replicated R times by adding them to the DstoreFileList
                     int i;
                     if((i = R - f.getDstoreAllocation().size()) > 0) {
                         for(int a = i; a > 0; a--) {
-                            DstoreFileList first = list.get(0);
+                            String name = f.getFileName();
+                            DstoreFileList d = getFirstDstoreWithoutFile(name, list);
+                            assert d != null;
+                            d.addFilesToAdd(name);
+                            d.getFiles().add(name);
+                            getIndex().get(f.getFileName()).addDstoreToAllocation(d.getPort());
+                            sortRebalanceList(list);
                         }
                     }
                 }
-
-                //this will then make sure all files are going to be replicated R times
-
-
-                //Add method to make sure all files are replicated R times and if not, add files that need more copies to the lowest Dstore.
-                //Perhaps could utilise the countdown index associated with each file w each list reply counting down all the files that it has
-                //we can then see which files have an amount of numbers still on the countdown latch.
-
-                //then we can remove files from Dstores which are not in the Index
-
-                //then we can remove files from the Index which no Dstores contain
 
                 DstoreFileList first = list.get(0);
                 DstoreFileList last = list.get(list.size() - 1);
@@ -426,6 +428,36 @@ public class Controller {
                     sortRebalanceList(list);
                     first = list.get(0);
                     last = list.get(list.size() - 1);
+                }
+                for(DstoreFileList d : list) {
+                    for(String file : d.getFilesToAdd()) {
+                        DstoreFileList sender = getFirstDstoreWithFile(file, list);
+                        assert sender != null;
+                        List<String> locationsToSend = new ArrayList<>(sender.getFilesToSend().get(file));
+                        locationsToSend.add(d.getPort());
+                        sender.addFilesToSend(file, locationsToSend);
+                    }
+                }
+                //now we formulate the messages and send them
+                for(DstoreFileList d : list) {
+                    List<String> filesToSend = new ArrayList<>();
+                    List<String> filesToRemove = new ArrayList<>();
+                    filesToSend.add(Integer.toString(d.getFilesToSend().size()));
+                    filesToRemove.add(Integer.toString(d.getFilesToRemove().size()));
+                    filesToRemove.addAll(d.getFilesToRemove());
+                    for(Map.Entry<String, List<String>> m : d.getFilesToSend().entrySet()) {
+                        filesToSend.add(m.getKey());
+                        filesToSend.add(Integer.toString(m.getValue().size()));
+                        filesToSend.addAll(m.getValue());
+                    }
+
+                    String send = String.join(" ", filesToSend);
+                    String remove = String.join(" ", filesToRemove);
+
+                    PrintWriter out = getDstoreList().get(d.getPort()).getOut();
+
+                    out.println("REBALANCE " + send + " " + remove);
+                    out.flush();
                 }
             } else {
                 System.err.println("Not all list replies received");
@@ -450,12 +482,20 @@ public class Controller {
 
     public static DstoreFileList getFirstDstoreWithoutFile(String fileName, List<DstoreFileList> entry) {
         for(DstoreFileList a : entry) {
-            if(a.getFiles().contains(fileName)) {
+            if(!a.getFiles().contains(fileName)) {
                 return a;
             }
         }
         return null;
+    }
 
+    public static DstoreFileList getFirstDstoreWithFile(String name, List<DstoreFileList> entry) {
+        for(DstoreFileList a : entry) {
+            if(a.getFiles().contains(name)) {
+                return a;
+            }
+        }
+        return null;
     }
 
     public static void transferFromList(List<String> from, List<String> to, String file) {
@@ -741,13 +781,24 @@ public class Controller {
         List<String> files;
         List<String> filesToAdd;
         List<String> filesToRemove;
+        HashMap<String, List<String>> filesToSend;
 
         DstoreFileList(String port, List<String> files) {
             this.port = port;
             this.files = files;
             this.filesToAdd = new ArrayList<>();
             this.filesToRemove = new ArrayList<>();
+            this.filesToSend = new HashMap<>();
         }
+
+        public synchronized HashMap<String, List<String>> getFilesToSend() {
+            return this.filesToSend;
+        }
+
+        public synchronized void addFilesToSend(String name, List<String> whereToSend) {
+            filesToSend.put(name, whereToSend);
+        }
+
 
         public synchronized void addFilesToAdd(String file) {
             this.filesToAdd.add(file);
