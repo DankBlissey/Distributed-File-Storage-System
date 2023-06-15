@@ -1,9 +1,12 @@
 import java.io.*;
 import java.net.*;
+import java.nio.Buffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Dstore class for storing files sent by client
@@ -17,6 +20,19 @@ public class Dstore {
     static Socket controller = null;
     static BufferedReader IN;
     static PrintWriter OUT;
+    static CountDownLatch cd;
+
+    static synchronized CountDownLatch getCountDownLatch() {
+        return cd;
+    }
+
+    static synchronized void countDown() {
+        cd.countDown();
+    }
+
+    static synchronized void setCountDownLatch(int i) {
+        cd = new CountDownLatch(i);
+    }
 
     static synchronized Socket getController() {
         return controller;
@@ -92,20 +108,9 @@ public class Dstore {
      */
     public static void StoreFile(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
         try {
-            System.out.println("Client Connected for storage: " + client.getInetAddress().getHostAddress());
-            InputStream inputStream = client.getInputStream();
-            byte[] buffer = new byte[1024];
-            int bytesRead;
-            Path destinationPath = Path.of(fileFolderTxt + fileName);
-            FileOutputStream fileOutputStream = new FileOutputStream(destinationPath.toString());
-
-            while ((bytesRead = inputStream.readNBytes(buffer, 0, buffer.length)) > 0) {
-                fileOutputStream.write(buffer, 0, bytesRead);
-            }
-            fileOutputStream.close();
-
+            System.out.println("Client Connected for storage: " + client.getInetAddress().getHostAddress() + " " + client.getPort());
+            generalStore(client,fileFolderTxt,fileName,in,out);
             System.out.println("File received and saved to: " + fileFolderTxt);
-
             getOUT().println("STORE_ACK " + fileName);
             System.out.println("Storage Acknowledgement of file " + fileName + " sent to controller");
         } catch (Exception e) {
@@ -139,10 +144,44 @@ public class Dstore {
                     System.out.println("Load request received:");
                     loadFile(client, lines[1]);
                 }
+                case "REBALANCE_STORE" -> {
+                    System.out.println("Rebalance store request recieved");
+                    out.println("ACK");
+                    out.flush();
+                    client.setSoTimeout(timeout);
+                    rebalanceStore(client,fileFolderTxt, lines[1], in, out);
+                }
                 default -> System.err.println("Malformed client message received, message was: " + lines[0]);
             }
         } catch (Exception e) {
             System.err.println("Confirmation of storage failed: ");
+        }
+    }
+
+    public static void generalStore(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
+        try {
+            InputStream inputStream = client.getInputStream();
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            Path destinationPath = Path.of(fileFolderTxt + fileName);
+            FileOutputStream fileOutputStream = new FileOutputStream(destinationPath.toString());
+
+            while ((bytesRead = inputStream.readNBytes(buffer, 0, buffer.length)) > 0) {
+                fileOutputStream.write(buffer, 0, bytesRead);
+            }
+            fileOutputStream.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void rebalanceStore(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
+        try {
+            System.out.println("Dstore Connected for rebalance storage: " + client.getInetAddress().getHostAddress() + " " + client.getPort());
+            generalStore(client, fileFolderTxt, fileName, in, out);
+            System.out.println("Rebalance file received and saved to: " + fileFolderTxt);
+        } catch (Exception e) {
+            System.err.println("error: " + e);
         }
     }
 
@@ -261,12 +300,90 @@ public class Dstore {
                             index++;
                             filesToRemove.add(lines[index]);
                         }
+                        int totalSendRequests = multiplyHashMap(filesToSend);
+                        setCountDownLatch(totalSendRequests);
+
+                        InetAddress address = InetAddress.getLocalHost();
+                        for(Map.Entry<String, List<String>> m : filesToSend.entrySet()) {
+                            for(String po : m.getValue()) {
+                                Socket DstoreSo = new Socket(address, Integer.parseInt(po));
+                                PrintWriter out = new PrintWriter(DstoreSo.getOutputStream());
+                                BufferedReader in = new BufferedReader(new InputStreamReader(DstoreSo.getInputStream()));
+                                String fileName = m.getKey();
+                                String path = fileFolderTxt + fileName;
+                                File fileSending = new File(path);
+                                long fileLength = fileSending.length();
+                                new Thread(new RebalanceThread(DstoreSo, in, out, fileName, fileLength)).start();
+                            }
+                        }
+                        boolean ack = getCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
+                        if(ack) {
+                            for(String f : filesToRemove) {
+                                System.out.println("Removing File " + f);
+                                removeFile(f);
+                            }
+                            OUT.println("REBALANCE_COMPLETE");
+                        } else {
+                            for(String f : filesToRemove) {
+                                System.out.println("Removing File " + f);
+                                removeFile(f);
+                            }
+                        }
+
                     }
                     default -> System.err.println("Malformed controller message received, message was: " + lines[0]);
                 }
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    public static int multiplyHashMap(HashMap<String, List<String>> hash) {
+        int i = 0;
+        for(Map.Entry<String, List<String>> m : hash.entrySet()) {
+            i += m.getValue().size();
+        }
+        return i;
+    }
+
+    static class RebalanceThread implements Runnable {
+        Socket Dstore;
+        BufferedReader in;
+        PrintWriter out;
+        String fileName;
+        long fileSize;
+
+
+        RebalanceThread(Socket s, BufferedReader in, PrintWriter out, String fileName, long fileSize) {
+            this.Dstore = s;
+            this.in = in;
+            this.out = out;
+            this.fileName = fileName;
+            this.fileSize = fileSize;
+        }
+
+        public void run() {
+            try {
+                System.out.println("Sending rebalance message to " + Dstore.getPort());
+                out.println("REBALANCE_STORE " + fileName + " " + fileSize);
+                byte[] fileBytes;
+                String path = fileFolderTxt + fileName;
+                fileBytes = Files.readAllBytes(Paths.get(path));
+                Dstore.setSoTimeout(timeout);
+                System.out.println("Reading acknowledgement line");
+                String ack = in.readLine();
+                System.out.println("Line read");
+                if(ack.equals("ACK")) {
+                    Dstore.getOutputStream().write(fileBytes);
+                    countDown();
+                    System.out.println("File data sent!");
+                } else {
+                    System.err.println("Error: malformed acknowledgement message from " + Dstore.getPort());
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 

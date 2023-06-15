@@ -536,7 +536,7 @@ public class Controller {
                         System.out.println("Dstore list for " + portName + " added to the rebalance file list");
                     }
                     case "REBALANCE_COMPLETE" -> {
-                        //other stuff
+                        System.out.println("Rebalance complete message recieved from: " + store.getSocket().getPort());
                     }
                     case "ERROR_FILE_DOES_NOT_EXIST" -> {
                         String fileName = lines[1];
@@ -628,7 +628,7 @@ public class Controller {
             while(true) {
                 synchronized (rebalanceObj) {
                     try {
-                        rebalanceObj.wait(rebalancePeriod.longValue());
+                        rebalanceObj.wait(rebalancePeriod.longValue() * 1000);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
