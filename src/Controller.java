@@ -354,6 +354,28 @@ public class Controller {
             if(listed) {
                 List<DstoreFileList> list = getRebalanceDstoreFiles();
                 sortRebalanceList(list);
+                //Add method to make sure all files are replicated R times and if not, add files that need more copies to the lowest Dstore.
+                //Perhaps could utilise the countdown index associated with each file w each list reply counting down all the files that it has
+                //we can then see which files have an amount of numbers still on the countdown latch.
+
+                //then we can remove files from Dstores which are not in the Index
+
+                //then we can remove files from the Index which no Dstores contain
+
+                DstoreFileList first = list.get(0);
+                DstoreFileList last = list.get(list.size() - 1);
+                //this makes sure files are spread evenly amongst Dstores
+                while(first.getFiles().size() + 1 < last.getFiles().size()) {
+                    String file = last.getFiles().get(0);
+                    transferFromList(last.getFiles(), last.getFilesToRemove(), file); // moving file from files to filesToRemove
+                    // adding file to files and filesToAdd
+                    first.getFilesToAdd().add(file);
+                    first.getFiles().add(file);
+                    //sorting the rebalance list for the next iteration
+                    sortRebalanceList(list);
+                    first = list.get(0);
+                    last = list.get(list.size() - 1);
+                }
             } else {
                 System.err.println("Not all list replies received");
             }
@@ -367,6 +389,11 @@ public class Controller {
         each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
         full dstore have 0-1 number of files between them.
          */
+    }
+
+    public static void transferFromList(List<String> from, List<String> to, String file) {
+        from.remove(file);
+        to.add(file);
     }
 
     public static void recieveDstoreMsg(DStoreI store) {
@@ -439,18 +466,6 @@ public class Controller {
         //DstoresWithFiles.addAll(0, Dstores);
         //return DstoresWithFiles.subList(0, Math.min(R,DstoresWithFiles.size()));
         //original fix for selecting Dstores, not as efficient as inserting all is O(n+m)
-    }
-
-    public static synchronized List<String> getDstoresInOrder() {
-        List<String> Dstores;
-        List<String> DstoresWithFiles;
-        System.out.println("getting list of All dstores");
-        Dstores = new ArrayList<>(getDstoreList().keySet());
-        System.out.println("getting dstore locations in order of least files");
-        DstoresWithFiles = getLocationsWithLeastFiles();
-        Dstores.removeAll(DstoresWithFiles);
-        Dstores.addAll(DstoresWithFiles);
-        return Dstores;
     }
 
     public static synchronized void sortRebalanceList(List<DstoreFileList> start) {
@@ -632,10 +647,38 @@ public class Controller {
     public static class DstoreFileList {
         String port;
         List<String> files;
+        List<String> filesToAdd;
+        List<String> filesToRemove;
 
         DstoreFileList(String port, List<String> files) {
             this.port = port;
             this.files = files;
+            this.filesToAdd = new ArrayList<>();
+            this.filesToRemove = new ArrayList<>();
+        }
+
+        public synchronized void addFilesToAdd(String file) {
+            this.filesToAdd.add(file);
+        }
+
+        public synchronized List<String> getFilesToAdd() {
+            return this.filesToAdd;
+        }
+
+        public synchronized void setFilesToAdd(List<String> files) {
+            this.filesToAdd = files;
+        }
+
+        public synchronized void addFilesToRemove(String file) {
+            this.filesToRemove.add(file);
+        }
+
+        public synchronized void setFilesToRemove(List<String> files) {
+            this.filesToRemove = files;
+        }
+
+        public synchronized List<String> getFilesToRemove() {
+            return this.filesToRemove;
         }
 
         public synchronized void setPort(String port) {
