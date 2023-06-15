@@ -17,6 +17,19 @@ public class Controller {
     static final Object rebalanceObj = new Object();
     static List<DstoreFileList> rebalanceDstoreFiles = new ArrayList<>();
     static CountDownLatch rebalanceCd;
+    static List<FileIndex> filesWithMissingDstores = new ArrayList<>();
+
+    public static synchronized void addMissingDstores(FileIndex f) {
+        filesWithMissingDstores.add(f);
+    }
+
+    public static synchronized List<FileIndex> getMissingDstores() {
+        return filesWithMissingDstores;
+    }
+
+    public static synchronized void clearMissingDstores() {
+        filesWithMissingDstores.clear();
+    }
 
     public static synchronized CountDownLatch getRebalanceCountDownLatch() {
         return rebalanceCd;
@@ -352,8 +365,46 @@ public class Controller {
         try {
             boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
             if(listed) {
+                /*
+                for(FileIndex f : getIndexFiles()) {
+                    if(f.getCountDownLatch().getCount() > 0) {
+                        addMissingDstores(f);
+                    }
+                }
+                 */
                 List<DstoreFileList> list = getRebalanceDstoreFiles();
                 sortRebalanceList(list);
+
+                //all of this should make sure files that are not in the index are removed from Dstores and files in the Index that no Dstore contains get removed from the index
+                for(DstoreFileList d : getRebalanceDstoreFiles()) {
+                    for(String file : d.getFiles()) {
+                        if((!isFileInIndex(file)) || ((isFileInIndex(file)) && !Index.get(file).getStatus().equals("store complete"))) {
+                            d.getFilesToRemove().add(file);
+                        }
+                    }
+                    d.getFiles().removeAll(d.getFilesToRemove());
+                }
+                List<FileIndex> files = new ArrayList<>(getIndexFiles());
+                for(FileIndex f : files) {
+                    List<String> actual = new ArrayList<>(f.getDstoresCorrectlyStoring());
+                    List<String> ideal = new ArrayList<>(f.getDstoreAllocation());
+                    if(f.getCountDownLatch().getCount() == R) {
+                        getIndex().remove(f.getFileName());
+                    } else if(!actual.containsAll(ideal)){
+                        ideal.removeAll(actual);
+                        f.getDstoreAllocation().removeAll(ideal);
+                    }
+                    int i;
+                    if((i = R - f.getDstoreAllocation().size()) > 0) {
+                        for(int a = i; a > 0; a--) {
+                            DstoreFileList first = list.get(0);
+                        }
+                    }
+                }
+
+                //this will then make sure all files are going to be replicated R times
+
+
                 //Add method to make sure all files are replicated R times and if not, add files that need more copies to the lowest Dstore.
                 //Perhaps could utilise the countdown index associated with each file w each list reply counting down all the files that it has
                 //we can then see which files have an amount of numbers still on the countdown latch.
@@ -366,7 +417,7 @@ public class Controller {
                 DstoreFileList last = list.get(list.size() - 1);
                 //this makes sure files are spread evenly amongst Dstores
                 while(first.getFiles().size() + 1 < last.getFiles().size()) {
-                    String file = last.getFiles().get(0);
+                    String file = getFirstFileNotInSmallerDstore(last.getFiles(), first.getFiles());
                     transferFromList(last.getFiles(), last.getFilesToRemove(), file); // moving file from files to filesToRemove
                     // adding file to files and filesToAdd
                     first.getFilesToAdd().add(file);
@@ -389,6 +440,22 @@ public class Controller {
         each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
         full dstore have 0-1 number of files between them.
          */
+    }
+
+    public static String getFirstFileNotInSmallerDstore(List<String> bigger, List<String> smaller) {
+        List<String> filesNotShared = new ArrayList<>(bigger);
+        filesNotShared.removeAll(smaller);
+        return filesNotShared.get(0);
+    }
+
+    public static DstoreFileList getFirstDstoreWithoutFile(String fileName, List<DstoreFileList> entry) {
+        for(DstoreFileList a : entry) {
+            if(a.getFiles().contains(fileName)) {
+                return a;
+            }
+        }
+        return null;
+
     }
 
     public static void transferFromList(List<String> from, List<String> to, String file) {
@@ -417,6 +484,12 @@ public class Controller {
                             addRebalanceDstoreFiles(new DstoreFileList(portName, new ArrayList<>()));
                         } else {
                             List<String> files = new ArrayList<>(Arrays.asList(lines).subList(1,lines.length));
+                            for(String f : files) {
+                                if(isFileInIndex(f)) {
+                                    countdownIndex(f);
+                                    getIndex().get(f).addDstoresCorrectlyStoring(Integer.toString(store.getSocket().getPort()));
+                                }
+                            }
                             addRebalanceDstoreFiles(new DstoreFileList(portName,files));
                         }
                         countDownRebalance();
@@ -504,6 +577,7 @@ public class Controller {
         }
     }
 
+
     static class RebalanceThread implements  Runnable {
 
         RebalanceThread() {
@@ -519,6 +593,9 @@ public class Controller {
                         e.printStackTrace();
                     }
                 }
+                for(FileIndex f : getIndex().values()) {
+                    f.setCountDownLatch(R);
+                }
                 rebalance();
             }
         }
@@ -530,6 +607,7 @@ public class Controller {
         List<String> DstoreAllocation;
         String status;
         CountDownLatch cdLatch;
+        List<String> DstoresCorrectlyStoring;
 
         FileIndex(String name, Integer size, List<String> allocation) {
             fileName = name;
@@ -537,6 +615,7 @@ public class Controller {
             DstoreAllocation = allocation;
             status = "store in progress";
             cdLatch = new CountDownLatch(allocation.size());
+            DstoresCorrectlyStoring = new ArrayList<>();
         }
 
         FileIndex(FileIndex f) {
@@ -545,6 +624,19 @@ public class Controller {
             DstoreAllocation = f.getDstoreAllocation();
             status = f.getStatus();
             cdLatch = f.getCountDownLatch();
+            DstoresCorrectlyStoring = f.getDstoresCorrectlyStoring();
+        }
+
+        public List<String> getDstoresCorrectlyStoring() {
+            return this.DstoresCorrectlyStoring;
+        }
+
+        public void addDstoresCorrectlyStoring(String d) {
+            this.DstoresCorrectlyStoring.add(d);
+        }
+
+        public void clearDstoresCorrectlyStoring() {
+            this.DstoresCorrectlyStoring.clear();
         }
 
         public CountDownLatch getCountDownLatch() {
