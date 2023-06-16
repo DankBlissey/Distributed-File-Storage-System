@@ -278,61 +278,67 @@ public class Dstore {
                         removeFile(fileName);
                     }
                     case "REBALANCE" -> {
-                        //index is the pointer that reads the lines of the received string
-                        int index = 1;
-                        // first number after the rebalance message says how many files are included in the files to send
-                        int filesSent = Integer.parseInt(lines[index]);
-                        // creates a list of the files to remove and a hashmap of the filesToSend as each file has a list of which Dstores to send to
-                        HashMap<String, List<String>> filesToSend = new HashMap<>();
-                        List<String> filesToRemove = new ArrayList<>();
-                        //this for loop parses the part of the message that includes which files to send
-                        for(int numberOfFilesSent = filesSent; numberOfFilesSent > 0; numberOfFilesSent--) {
-                            index++;
-                            String fileName = lines[index];
-                            List<String> dstoresToSendList = new ArrayList<>();
-                            index++;
-                            int dstoreToSend = Integer.parseInt(lines[index]);
-                            for(int numberOfDstoresToSend = dstoreToSend; numberOfDstoresToSend > 0; numberOfDstoresToSend--) {
+                        if(lines.length > 1) {
+                            System.out.println("Rebalance message received from controller");
+                            //index is the pointer that reads the lines of the received string
+                            int index = 1;
+                            // first number after the rebalance message says how many files are included in the files to send
+                            int filesSent = Integer.parseInt(lines[index]);
+                            // creates a list of the files to remove and a hashmap of the filesToSend as each file has a list of which Dstores to send to
+                            HashMap<String, List<String>> filesToSend = new HashMap<>();
+                            List<String> filesToRemove = new ArrayList<>();
+                            //this for loop parses the part of the message that includes which files to send
+                            for(int numberOfFilesSent = filesSent; numberOfFilesSent > 0; numberOfFilesSent--) {
                                 index++;
-                                dstoresToSendList.add(lines[index]);
+                                String fileName = lines[index];
+                                List<String> dstoresToSendList = new ArrayList<>();
+                                index++;
+                                int dstoreToSend = Integer.parseInt(lines[index]);
+                                for(int numberOfDstoresToSend = dstoreToSend; numberOfDstoresToSend > 0; numberOfDstoresToSend--) {
+                                    index++;
+                                    dstoresToSendList.add(lines[index]);
+                                }
+                                filesToSend.put(fileName, dstoresToSendList);
                             }
-                            filesToSend.put(fileName, dstoresToSendList);
-                        }
-                        index++;
-                        int removesSent = Integer.parseInt(lines[index]);
-                        //this for loop parsees the part of the message that includes which files to remove
-                        for(int numberOfRemovesSent = removesSent; numberOfRemovesSent > 0; numberOfRemovesSent--) {
                             index++;
-                            filesToRemove.add(lines[index]);
-                        }
-                        int totalSendRequests = multiplyHashMap(filesToSend);
-                        setCountDownLatch(totalSendRequests);
+                            int removesSent = Integer.parseInt(lines[index]);
+                            //this for loop parsees the part of the message that includes which files to remove
+                            for(int numberOfRemovesSent = removesSent; numberOfRemovesSent > 0; numberOfRemovesSent--) {
+                                index++;
+                                filesToRemove.add(lines[index]);
+                            }
+                            int totalSendRequests = multiplyHashMap(filesToSend);
+                            setCountDownLatch(totalSendRequests);
 
-                        InetAddress address = InetAddress.getLocalHost();
-                        for(Map.Entry<String, List<String>> m : filesToSend.entrySet()) {
-                            for(String po : m.getValue()) {
-                                Socket DstoreSo = new Socket(address, Integer.parseInt(po));
-                                PrintWriter out = new PrintWriter(DstoreSo.getOutputStream());
-                                BufferedReader in = new BufferedReader(new InputStreamReader(DstoreSo.getInputStream()));
-                                String fileName = m.getKey();
-                                String path = fileFolderTxt + fileName;
-                                File fileSending = new File(path);
-                                long fileLength = fileSending.length();
-                                new Thread(new RebalanceThread(DstoreSo, in, out, fileName, fileLength)).start();
+                            InetAddress address = InetAddress.getLocalHost();
+                            for(Map.Entry<String, List<String>> m : filesToSend.entrySet()) {
+                                for(String po : m.getValue()) {
+                                    Socket DstoreSo = new Socket(address, Integer.parseInt(po));
+                                    PrintWriter out = new PrintWriter(DstoreSo.getOutputStream());
+                                    BufferedReader in = new BufferedReader(new InputStreamReader(DstoreSo.getInputStream()));
+                                    String fileName = m.getKey();
+                                    String path = fileFolderTxt + fileName;
+                                    File fileSending = new File(path);
+                                    long fileLength = fileSending.length();
+                                    new Thread(new RebalanceThread(DstoreSo, in, out, fileName, fileLength)).start();
+                                }
                             }
-                        }
-                        boolean ack = getCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
-                        if(ack) {
-                            for(String f : filesToRemove) {
-                                System.out.println("Removing File " + f);
-                                removeFile(f);
+                            boolean ack = getCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
+                            if(ack) {
+                                for(String f : filesToRemove) {
+                                    System.out.println("Removing File " + f);
+                                    removeFile(f);
+                                }
+                                OUT.println("REBALANCE_COMPLETE");
+                            } else {
+                                for(String f : filesToRemove) {
+                                    System.out.println("Removing File " + f);
+                                    removeFile(f);
+                                }
                             }
-                            OUT.println("REBALANCE_COMPLETE");
                         } else {
-                            for(String f : filesToRemove) {
-                                System.out.println("Removing File " + f);
-                                removeFile(f);
-                            }
+                            System.out.println("Rebalance message received for nothing");
+                            OUT.println("REBALANCE_COMPLETE");
                         }
 
                     }

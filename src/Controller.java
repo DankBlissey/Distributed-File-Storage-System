@@ -39,8 +39,8 @@ public class Controller {
         rebalanceCd = new CountDownLatch(i);
     }
 
-    public static synchronized void countDownRebalance() {
-        getRebalanceCountDownLatch().countDown();
+    public static void countDownRebalance() {
+        rebalanceCd.countDown();
     }
 
     public static synchronized void addRebalanceDstoreFiles(DstoreFileList s) {
@@ -357,14 +357,18 @@ public class Controller {
     }
 
     public static synchronized void rebalance() {
+        System.out.println("rebalance called, caling List for each Dstore");
         setRebalanceCountDownLatch(getDstoreList().size());
+        System.out.println("set rebalance latch to ");
         for(DStoreI d : getDstoreList().values()) {
             d.getOut().println("LIST");
             d.getOut().flush();
         }
+        System.out.println("List called, waiting for all Lists to be received");
         try {
             boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
             if(listed) {
+                System.out.println("All list replies received");
                 /*
                 for(FileIndex f : getIndexFiles()) {
                     if(f.getCountDownLatch().getCount() > 0) {
@@ -374,6 +378,8 @@ public class Controller {
                  */
                 List<DstoreFileList> list = getRebalanceDstoreFiles();
                 sortRebalanceList(list);
+
+                System.out.println("Removing waste from Dstores");
 
                 //this should make sure files that are not in the index are removed from Dstores and files in the Index that no Dstore contains get removed from the index
                 for(DstoreFileList d : getRebalanceDstoreFiles()) {
@@ -387,6 +393,7 @@ public class Controller {
 
                 List<FileIndex> files = new ArrayList<>(getIndexFiles());
 
+                System.out.println("Removing waste from Index");
 
                 for(FileIndex f : files) {
                     List<String> actual = new ArrayList<>(f.getDstoresCorrectlyStoring());
@@ -415,6 +422,7 @@ public class Controller {
                     }
                 }
 
+                System.out.println("making sure files are spread evenly amongst Dstores");
                 DstoreFileList first = list.get(0);
                 DstoreFileList last = list.get(list.size() - 1);
                 //this makes sure files are spread evenly amongst Dstores
@@ -438,6 +446,7 @@ public class Controller {
                         sender.addFilesToSend(file, locationsToSend);
                     }
                 }
+                System.out.println("Formulating messages to send to the Dstores");
                 //now we formulate the messages and send them
                 for(DstoreFileList d : list) {
                     List<String> filesToSend = new ArrayList<>();
@@ -459,6 +468,7 @@ public class Controller {
                     out.println("REBALANCE " + send + " " + remove);
                     out.flush();
                 }
+                System.out.println("Messages sent");
             } else {
                 System.err.println("Not all list replies received");
             }
