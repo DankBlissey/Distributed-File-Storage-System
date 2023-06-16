@@ -278,10 +278,14 @@ public class Dstore {
                         removeFile(fileName);
                     }
                     case "REBALANCE" -> {
+                        //index is the pointer that reads the lines of the received string
                         int index = 1;
+                        // first number after the rebalance message says how many files are included in the files to send
                         int filesSent = Integer.parseInt(lines[index]);
+                        // creates a list of the files to remove and a hashmap of the filesToSend as each file has a list of which Dstores to send to
                         HashMap<String, List<String>> filesToSend = new HashMap<>();
                         List<String> filesToRemove = new ArrayList<>();
+                        //this for loop parses the part of the message that includes which files to send
                         for(int numberOfFilesSent = filesSent; numberOfFilesSent > 0; numberOfFilesSent--) {
                             index++;
                             String fileName = lines[index];
@@ -296,6 +300,7 @@ public class Dstore {
                         }
                         index++;
                         int removesSent = Integer.parseInt(lines[index]);
+                        //this for loop parsees the part of the message that includes which files to remove
                         for(int numberOfRemovesSent = removesSent; numberOfRemovesSent > 0; numberOfRemovesSent--) {
                             index++;
                             filesToRemove.add(lines[index]);
