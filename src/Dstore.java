@@ -221,6 +221,20 @@ public class Dstore {
         }
     }
 
+    public static void rebalanceRemove(String fileName) {
+        String folderPath = fileFolderTxt + fileName;
+        File file = new File(folderPath);
+        try {
+            if(file.exists()) {
+                System.out.println("File deleted " + file.delete());
+            } else {
+                System.out.println("Error file " + fileName + " does not exist");
+            }
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     /**
      * Takes a filename, finds that file within the Dstore storage location, and then outputs its content to the client
      * @param client socket for the client connection
@@ -251,6 +265,7 @@ public class Dstore {
             String input;
             while((input = getIN().readLine()) != null) {
                 System.out.println("controller input is not null");
+                System.out.println("Controller message received of: " + input);
                 //while(!getIN().ready()) {
                     //System.out.println("in not ready in listenController");
                     //wait for IN to be ready
@@ -260,14 +275,16 @@ public class Dstore {
                 String[] lines = input.split(" ");
                 switch (lines[0]) {
                     case "LIST" -> {
+                        System.out.println("List request from controller received");
                         File location = new File(fileFolderTxt);
                         File[] fileList = location.listFiles();
                         synchronized (Dstore.class) {
                             getOUT().print("LIST");
                             getOUT().flush();
-                            assert fileList != null : "no files to list";
-                            for(File x : fileList) {
-                                getOUT().print(" " + x.getName());
+                            if(fileList != null) {
+                                for(File x : fileList) {
+                                    getOUT().print(" " + x.getName());
+                                }
                             }
                             getOUT().println("");
                             getOUT().flush();
@@ -327,20 +344,19 @@ public class Dstore {
                             if(ack) {
                                 for(String f : filesToRemove) {
                                     System.out.println("Removing File " + f);
-                                    removeFile(f);
+                                    rebalanceRemove(f);
                                 }
                                 OUT.println("REBALANCE_COMPLETE");
                             } else {
                                 for(String f : filesToRemove) {
                                     System.out.println("Removing File " + f);
-                                    removeFile(f);
+                                    rebalanceRemove(f);
                                 }
                             }
                         } else {
                             System.out.println("Rebalance message received for nothing");
                             OUT.println("REBALANCE_COMPLETE");
                         }
-
                     }
                     default -> System.err.println("Malformed controller message received, message was: " + lines[0]);
                 }
