@@ -87,8 +87,10 @@ public class Dstore {
             while(true) {
                 try {
                     Socket c = port.accept();
+                    assert c != null : "Socket is null";
                     BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream()));
                     PrintWriter out = new PrintWriter(c.getOutputStream());
+                    System.out.println("New Dstore thread being created");
                     new Thread(new DstoreThread(c,in,out)).start();
                     System.out.println("Client connected:");
                 } catch (Exception e) {
@@ -124,9 +126,12 @@ public class Dstore {
      * @param client socket that receives the message
      */
     public static void ReceiveRequest(Socket client, BufferedReader in, PrintWriter out) {
+        System.out.println("Receiving request");
         try {
             String line;
+            System.out.println("Reading line");
             line = in.readLine();
+            System.out.println("Line read");
             String[] lines = line.split(" ");
             switch (lines[0]) {
                 case "STORE" -> {
@@ -166,7 +171,7 @@ public class Dstore {
             Path destinationPath = Path.of(fileFolderTxt + fileName);
             FileOutputStream fileOutputStream = new FileOutputStream(destinationPath.toString());
 
-            while ((bytesRead = inputStream.readNBytes(buffer, 0, buffer.length)) > 0) {
+            while ((bytesRead = inputStream.read(buffer)) > 0) {
                 fileOutputStream.write(buffer, 0, bytesRead);
             }
             fileOutputStream.close();
@@ -180,6 +185,7 @@ public class Dstore {
             System.out.println("Dstore Connected for rebalance storage: " + client.getInetAddress().getHostAddress() + " " + client.getPort());
             generalStore(client, fileFolderTxt, fileName, in, out);
             System.out.println("Rebalance file received and saved to: " + fileFolderTxt);
+            client.close();
         } catch (Exception e) {
             System.err.println("error: " + e);
         }
@@ -394,6 +400,7 @@ public class Dstore {
             try {
                 System.out.println("Sending rebalance message to " + Dstore.getPort());
                 out.println("REBALANCE_STORE " + fileName + " " + fileSize);
+                out.flush();
                 byte[] fileBytes;
                 String path = fileFolderTxt + fileName;
                 fileBytes = Files.readAllBytes(Paths.get(path));
@@ -401,7 +408,9 @@ public class Dstore {
                 System.out.println("Reading acknowledgement line");
                 String ack = in.readLine();
                 System.out.println("Line read");
-                if(ack.equals("ACK")) {
+                if(Objects.equals(ack, "ACK")) {
+                    System.out.println(Arrays.toString(fileBytes));
+                    System.out.println("ACK received, sending file");
                     Dstore.getOutputStream().write(fileBytes);
                     countDown();
                     System.out.println("File data sent!");
@@ -437,6 +446,7 @@ public class Dstore {
          * tries to run the method to receive a request
          */
         public void run() {
+            System.out.println("DstoreThread created, receiving request");
             ReceiveRequest(client, in, out);
             try {
                 client.close();
