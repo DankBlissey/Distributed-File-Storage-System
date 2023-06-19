@@ -16,6 +16,8 @@ public class Controller {
     static HashMap<DStoreI, String> ReverseDstoreList = new HashMap<>();
     static ThreadLocal<Integer> indexToStore = new ThreadLocal<>();
     static final Object rebalanceObj = new Object();
+    static final Object rebalanceLock = new Object();
+    static final Object rebalanceStart = new Object();
     static List<DstoreFileList> rebalanceDstoreFiles = new ArrayList<>();
     static CountDownLatch rebalanceCd;
 
@@ -145,7 +147,9 @@ public class Controller {
             timeout = Integer.parseInt(args[2]);
             rebalancePeriod = Integer.parseInt(args[3]);
             System.out.println("Starting");
-            new Thread(new RebalanceThread()).start();
+            Thread rebThread = new Thread(new RebalanceThread());
+            rebThread.setPriority(10);
+            rebThread.start();
 
             while(true) {
                 try {
@@ -172,6 +176,10 @@ public class Controller {
             while((line = in.readLine()) != null) {
                 System.out.println("Line read");
                 String[] lines = line.split(" ");
+                synchronized (rebalanceStart) {
+                    System.out.println("Waiting for rebalance to finish if it is running");
+                    //waits until rebalance has finished before starting to serve a client request
+                }
                 switch (lines[0]) {
                     case "JOIN" -> {
                         System.out.println("Dstore connected with port " + lines[1]);
@@ -191,49 +199,52 @@ public class Controller {
 
                     case "STORE" -> {
                         System.out.println("Client store request");
-                        synchronized (Controller.class) {
-                            if (getDstoreList().size() >= R) {
-                                if ((!isFileInIndex(lines[1])) || ((isFileInIndex(lines[1])) && (getIndex().get(lines[1]).getStatus().equals("remove complete")))) {
-                                    System.out.println("selecting Dstores");
-                                    List<String> Dgo = selectDstores();
-                                    String fileName = lines[1];
-                                    Integer fileSize = Integer.parseInt(lines[2]);
-                                    System.out.println("Adding file " + fileName + " to index");
-                                    addToIndex(new FileIndex(fileName, fileSize, Dgo));
-                                    System.out.println("allocating Dstores for " + fileName);
-                                    allocateDstores(c, Dgo, in, out);
+                        synchronized (rebalanceLock) {
+                            //this means that rebalance will have to wait for store to complete before it may start
+                            synchronized (Controller.class) {
+                                if (getDstoreList().size() >= R) {
+                                    if ((!isFileInIndex(lines[1])) || ((isFileInIndex(lines[1])) && (getIndex().get(lines[1]).getStatus().equals("remove complete")))) {
+                                        System.out.println("selecting Dstores");
+                                        List<String> Dgo = selectDstores();
+                                        String fileName = lines[1];
+                                        Integer fileSize = Integer.parseInt(lines[2]);
+                                        System.out.println("Adding file " + fileName + " to index");
+                                        addToIndex(new FileIndex(fileName, fileSize, Dgo));
+                                        System.out.println("allocating Dstores for " + fileName);
+                                        allocateDstores(c, Dgo, in, out);
+                                    } else {
+                                        System.err.println("Error with storage request: file already exists");
+                                        out.println("ERROR_FILE_ALREADY_EXISTS");
+                                        out.flush();
+                                        break;
+                                        //c.close();
+                                    }
                                 } else {
-                                    System.err.println("Error with storage request: file already exists");
-                                    out.println("ERROR_FILE_ALREADY_EXISTS");
+                                    System.err.println("Error with storage request: not enough Dstores");
+                                    out.println("ERROR_NOT_ENOUGH_DSTORES");
                                     out.flush();
                                     break;
                                     //c.close();
                                 }
-                            } else {
-                                System.err.println("Error with storage request: not enough Dstores");
-                                out.println("ERROR_NOT_ENOUGH_DSTORES");
-                                out.flush();
-                                break;
-                                //c.close();
                             }
-                        }
-                        String fileName = lines[1];
-                        try {
-                            Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
-                            if(acknow.equals(true)) {
-                                updateIndexStatus(fileName, "store complete");
-                                out.println("STORE_COMPLETE");
-                                out.flush();
-                                setLatch(fileName, R);
-                                //c.close();
-                            } else {
+                            String fileName = lines[1];
+                            try {
+                                Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
+                                if(acknow.equals(true)) {
+                                    updateIndexStatus(fileName, "store complete");
+                                    out.println("STORE_COMPLETE");
+                                    out.flush();
+                                    setLatch(fileName, R);
+                                    //c.close();
+                                } else {
+                                    removeFromIndex(fileName);
+                                    //c.close();
+                                }
+                            } catch (Exception e) {
+                                e.printStackTrace();
                                 removeFromIndex(fileName);
                                 //c.close();
                             }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                            removeFromIndex(fileName);
-                            //c.close();
                         }
                     }
                     case "LOAD" -> {
@@ -291,52 +302,55 @@ public class Controller {
 
                     }
                     case "REMOVE" -> {
-                        System.out.println("client remove request: ");
-                        String fileName = lines[1];
-                        synchronized (Controller.class) {
-                            if (getDstoreList().size() >= R) {
-                                if (isFileInIndex(lines[1])) {
-                                    if (getIndexFile(fileName).getStatus().equals("store complete")) {
-                                        updateIndexStatus(fileName, "remove in progress");
-                                        List<String> DstoresWFile = getIndexFile(fileName).getDstoreAllocation();
-                                        for(String s : DstoresWFile) {
-                                            PrintWriter out1 = getDstoreI(s).getOut();
-                                            out1.println("REMOVE " + fileName);
-                                            out1.flush();
+                        synchronized (rebalanceLock) {
+                            //this means rebalance will have to wait for a remove request to finish
+                            System.out.println("client remove request: ");
+                            String fileName = lines[1];
+                            synchronized (Controller.class) {
+                                if (getDstoreList().size() >= R) {
+                                    if (isFileInIndex(lines[1])) {
+                                        if (getIndexFile(fileName).getStatus().equals("store complete")) {
+                                            updateIndexStatus(fileName, "remove in progress");
+                                            List<String> DstoresWFile = getIndexFile(fileName).getDstoreAllocation();
+                                            for(String s : DstoresWFile) {
+                                                PrintWriter out1 = getDstoreI(s).getOut();
+                                                out1.println("REMOVE " + fileName);
+                                                out1.flush();
+                                            }
+                                        } else {
+                                            out.println("ERROR_FILE_DOES_NOT_EXIST");
+                                            System.err.println("File requested to be removed was not a fully stored file");
+                                            break;
                                         }
                                     } else {
                                         out.println("ERROR_FILE_DOES_NOT_EXIST");
-                                        System.err.println("File requested to be removed was not a fully stored file");
+                                        out.flush();
                                         break;
+                                        //c.close();
                                     }
                                 } else {
-                                    out.println("ERROR_FILE_DOES_NOT_EXIST");
+                                    out.println("ERROR_NOT_ENOUGH_DSTORES");
                                     out.flush();
                                     break;
                                     //c.close();
                                 }
-                            } else {
-                                out.println("ERROR_NOT_ENOUGH_DSTORES");
-                                out.flush();
-                                break;
+                            }
+                            try {
+                                Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
+                                if(acknow.equals(true)) {
+                                    updateIndexStatus(fileName, "remove complete");
+                                    out.println("REMOVE_COMPLETE");
+                                    out.flush();
+                                    setLatch(fileName, R);
+                                    //c.close();
+                                } else {
+                                    System.err.println("timeout with receiving acknowledgement of removal");
+                                    //c.close();
+                                }
+                            } catch (Exception e) {
+                                e.printStackTrace();
                                 //c.close();
                             }
-                        }
-                        try {
-                            Boolean acknow = getLatch(fileName).await(timeout, TimeUnit.MILLISECONDS);
-                            if(acknow.equals(true)) {
-                                updateIndexStatus(fileName, "remove complete");
-                                out.println("REMOVE_COMPLETE");
-                                out.flush();
-                                setLatch(fileName, R);
-                                //c.close();
-                            } else {
-                                System.err.println("timeout with receiving acknowledgement of removal");
-                                //c.close();
-                            }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                            //c.close();
                         }
                     }
                     case "LIST" -> {
@@ -372,132 +386,136 @@ public class Controller {
     }
 
     public static void rebalance() {
-        System.out.println("rebalance called, caling List for each Dstore");
-        System.out.println("Number of Dstores: " + getDstoreList().size());
-        setRebalanceCountDownLatch(getDstoreList().size());
-        System.out.println("set rebalance latch to " + getDstoreList().size());
-        for(DStoreI d : getDstoreList().values()) {
-            d.getOut().println("LIST");
-            d.getOut().flush();
-        }
-        System.out.println("List called, waiting for all Lists to be received");
-        try {
-            boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
-            if(listed) {
-                System.out.println("All list replies received");
-                List<DstoreFileList> list = getRebalanceDstoreFiles();
-                sortRebalanceList(list);
+        synchronized (rebalanceStart) {
+            synchronized (rebalanceLock) {
 
-                System.out.println("Removing waste from Dstores");
-
-                //this should make sure files that are not in the index are removed from Dstores and files in the Index that no Dstore contains get removed from the index
-                for(DstoreFileList d : getRebalanceDstoreFiles()) {
-                    for(String file : d.getFiles()) {
-                        if((!isFileInIndex(file)) || ((isFileInIndex(file)) && !Index.get(file).getStatus().equals("store complete"))) {
-                            d.getFilesToRemove().add(file);
-                        }
-                    }
-                    d.getFiles().removeAll(d.getFilesToRemove());
-                }
-
-                List<FileIndex> files = new ArrayList<>(getIndexFiles());
-
-                System.out.println("Removing waste from Index");
-
-                for(FileIndex f : files) {
-                    List<String> actual = new ArrayList<>(f.getDstoresCorrectlyStoring());
-                    List<String> ideal = new ArrayList<>(f.getDstoreAllocation());
-                    //removes the file if it was not stored by any Dstore
-                    if(f.getCountDownLatch().getCount() == R) {
-                        getIndex().remove(f.getFileName());
-                    } else if(!actual.containsAll(ideal)){
-                        //this bit removes from the Index Dstores allocated to a file that do not actually contain it
-                        ideal.removeAll(actual);
-                        getIndexDstores(f.getFileName()).removeAll(ideal);
-                    }
-
-                    //this bit ensures that all files are replicated R times by adding them to the DstoreFileList
-                    int i;
-                    if((i = R - f.getDstoreAllocation().size()) > 0) {
-                        for(int a = i; a > 0; a--) {
-                            String name = f.getFileName();
-                            DstoreFileList d = getFirstDstoreWithoutFile(name, list);
-                            assert d != null;
-                            String dPort = d.getPort();
-                            DstoreFileList s = getFirstDstoreWithFile(name, list);
-                            assert s != null;
-                            List<String> locations;
-                            if(s.getFilesToSend().get(name) == null) {
-                                locations = new ArrayList<>();
-                            } else {
-                                locations = new ArrayList<>(s.getFilesToSend().get(name));
-                            }
-                            locations.add(dPort);
-                            s.addFilesToSend(name, locations);
-                            d.addFilesToAdd(name);
-                            d.getFiles().add(name);
-                            addDstoreToFileIndex(f.getFileName(), dPort);
-                            sortRebalanceList(list);
-                        }
-                    }
-                }
-
-                System.out.println("making sure files are spread evenly amongst Dstores");
-                DstoreFileList first = list.get(0);
-                DstoreFileList last = list.get(list.size() - 1);
-                //this makes sure files are spread evenly amongst Dstores
-                while(first.getFiles().size() + 1 < last.getFiles().size()) {
-                    String file = getFirstFileNotInSmallerDstore(last.getFiles(), first.getFiles());
-                    transferFromList(last.getFiles(), last.getFilesToRemove(), file); // moving file from files to filesToRemove
-                    removeDstoreFromOneFileIndex(file, last.getPort());
-                    List<String> locationsToSend;
-                    if(last.getFilesToSend().get(file) == null) {
-                        locationsToSend = new ArrayList<>();
-                    } else {
-                        locationsToSend = new ArrayList<>(last.getFilesToSend().get(file));
-                    }
-                    locationsToSend.add(first.getPort());
-                    last.addFilesToSend(file, locationsToSend);
-                    // adding file to files and filesToAdd
-                    first.getFilesToAdd().add(file);
-                    first.getFiles().add(file);
-                    addDstoreToFileIndex(file, first.getPort());
-                    //sorting the rebalance list for the next iteration
-                    sortRebalanceList(list);
-                    first = list.get(0);
-                    last = list.get(list.size() - 1);
-                }
-                System.out.println("Formulating messages to send to the Dstores");
-                System.out.println(list);
-                //now we formulate the messages and send them
-                for(DstoreFileList d : list) {
-                    List<String> filesToSend = new ArrayList<>();
-                    List<String> filesToRemove = new ArrayList<>();
-                    filesToSend.add(Integer.toString(d.getFilesToSend().size()));
-                    filesToRemove.add(Integer.toString(d.getFilesToRemove().size()));
-                    filesToRemove.addAll(d.getFilesToRemove());
-                    for(Map.Entry<String, List<String>> m : d.getFilesToSend().entrySet()) {
-                        filesToSend.add(m.getKey());
-                        filesToSend.add(Integer.toString(m.getValue().size()));
-                        filesToSend.addAll(m.getValue());
-                    }
-
-                    String send = String.join(" ", filesToSend);
-                    String remove = String.join(" ", filesToRemove);
-
-                    PrintWriter out = getDstoreList().get(d.getPort()).getOut();
-
-                    out.println("REBALANCE " + send + " " + remove);
-                    out.flush();
-                }
-                System.out.println("Messages sent");
-                getRebalanceDstoreFiles().clear();
-            } else {
-                System.err.println("Not all list replies received, countDownLatch at : " + getRebalanceCountDownLatch().getCount());
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+            System.out.println("rebalance called, caling List for each Dstore");
+            System.out.println("Number of Dstores: " + getDstoreList().size());
+            setRebalanceCountDownLatch(getDstoreList().size());
+            System.out.println("set rebalance latch to " + getDstoreList().size());
+            for(DStoreI d : getDstoreList().values()) {
+                d.getOut().println("LIST");
+                d.getOut().flush();
+            }
+            System.out.println("List called, waiting for all Lists to be received");
+            try {
+                boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
+                if(listed) {
+                    System.out.println("All list replies received");
+                    List<DstoreFileList> list = getRebalanceDstoreFiles();
+                    sortRebalanceList(list);
+
+                    System.out.println("Removing waste from Dstores");
+
+                    //this should make sure files that are not in the index are removed from Dstores and files in the Index that no Dstore contains get removed from the index
+                    for(DstoreFileList d : getRebalanceDstoreFiles()) {
+                        for(String file : d.getFiles()) {
+                            if((!isFileInIndex(file)) || ((isFileInIndex(file)) && ((!Index.get(file).getStatus().equals("store complete")) || (!Index.get(file).getDstoreAllocation().contains(d.getPort()))))) {
+                                d.getFilesToRemove().add(file);
+                            }
+                        }
+                        d.getFiles().removeAll(d.getFilesToRemove());
+                    }
+
+                    List<FileIndex> files = new ArrayList<>(getIndexFiles());
+
+                    System.out.println("Removing waste from Index");
+
+                    for(FileIndex f : files) {
+                        List<String> actual = new ArrayList<>(f.getDstoresCorrectlyStoring());
+                        List<String> ideal = new ArrayList<>(f.getDstoreAllocation());
+                        //removes the file if it was not stored by any Dstore
+                        if(f.getCountDownLatch().getCount() == R) {
+                            getIndex().remove(f.getFileName());
+                        } else if(!actual.containsAll(ideal)){
+                            //this bit removes from the Index Dstores allocated to a file that do not actually contain it
+                            ideal.removeAll(actual);
+                            getIndexDstores(f.getFileName()).removeAll(ideal);
+                        }
+
+                        //this bit ensures that all files are replicated R times by adding them to the DstoreFileList
+                        int i;
+                        if((i = R - f.getDstoreAllocation().size()) > 0) {
+                            for(int a = i; a > 0; a--) {
+                                String name = f.getFileName();
+                                DstoreFileList d = getFirstDstoreWithoutFile(name, list);
+                                assert d != null;
+                                String dPort = d.getPort();
+                                DstoreFileList s = getFirstDstoreWithFile(name, list);
+                                assert s != null;
+                                List<String> locations;
+                                if(s.getFilesToSend().get(name) == null) {
+                                    locations = new ArrayList<>();
+                                } else {
+                                    locations = new ArrayList<>(s.getFilesToSend().get(name));
+                                }
+                                locations.add(dPort);
+                                s.addFilesToSend(name, locations);
+                                d.addFilesToAdd(name);
+                                d.getFiles().add(name);
+                                addDstoreToFileIndex(f.getFileName(), dPort);
+                                sortRebalanceList(list);
+                            }
+                        }
+                    }
+
+                    System.out.println("making sure files are spread evenly amongst Dstores");
+                    DstoreFileList first = list.get(0);
+                    DstoreFileList last = list.get(list.size() - 1);
+                    //this makes sure files are spread evenly amongst Dstores
+                    while(first.getFiles().size() + 1 < last.getFiles().size()) {
+                        String file = getFirstFileNotInSmallerDstore(last.getFiles(), first.getFiles());
+                        transferFromList(last.getFiles(), last.getFilesToRemove(), file); // moving file from files to filesToRemove
+                        removeDstoreFromOneFileIndex(file, last.getPort());
+                        List<String> locationsToSend;
+                        if(last.getFilesToSend().get(file) == null) {
+                            locationsToSend = new ArrayList<>();
+                        } else {
+                            locationsToSend = new ArrayList<>(last.getFilesToSend().get(file));
+                        }
+                        locationsToSend.add(first.getPort());
+                        last.addFilesToSend(file, locationsToSend);
+                        // adding file to files and filesToAdd
+                        first.getFilesToAdd().add(file);
+                        first.getFiles().add(file);
+                        addDstoreToFileIndex(file, first.getPort());
+                        //sorting the rebalance list for the next iteration
+                        sortRebalanceList(list);
+                        first = list.get(0);
+                        last = list.get(list.size() - 1);
+                    }
+                    System.out.println("Formulating messages to send to the Dstores");
+                    System.out.println(list);
+                    //now we formulate the messages and send them
+                    for(DstoreFileList d : list) {
+                        List<String> filesToSend = new ArrayList<>();
+                        List<String> filesToRemove = new ArrayList<>();
+                        filesToSend.add(Integer.toString(d.getFilesToSend().size()));
+                        filesToRemove.add(Integer.toString(d.getFilesToRemove().size()));
+                        filesToRemove.addAll(d.getFilesToRemove());
+                        for(Map.Entry<String, List<String>> m : d.getFilesToSend().entrySet()) {
+                            filesToSend.add(m.getKey());
+                            filesToSend.add(Integer.toString(m.getValue().size()));
+                            filesToSend.addAll(m.getValue());
+                        }
+
+                        String send = String.join(" ", filesToSend);
+                        String remove = String.join(" ", filesToRemove);
+
+                        PrintWriter out = getDstoreList().get(d.getPort()).getOut();
+
+                        out.println("REBALANCE " + send + " " + remove);
+                        out.flush();
+                    }
+                    System.out.println("Messages sent");
+                    getRebalanceDstoreFiles().clear();
+                } else {
+                    System.err.println("Not all list replies received, countDownLatch at : " + getRebalanceCountDownLatch().getCount());
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
 
 
         /*
@@ -505,6 +523,7 @@ public class Controller {
         each transfer adds the file to the big Dstore's list to remove and adds the file to the small Dstore's list to add,this repeats until the most full and the least
         full dstore have 0-1 number of files between them.
          */
+        }
     }
 
     public static String getFirstFileNotInSmallerDstore(List<String> bigger, List<String> smaller) {
