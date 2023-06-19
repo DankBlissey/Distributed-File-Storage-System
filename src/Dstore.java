@@ -108,10 +108,10 @@ public class Dstore {
      * @param fileFolderTxt string of the storage location path
      * @param fileName name to save the file as
      */
-    public static void StoreFile(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
+    public static void StoreFile(Socket client, String fileFolderTxt, String fileName, long fileLength, BufferedReader in, PrintWriter out) {
         try {
             System.out.println("Client Connected for storage: " + client.getInetAddress().getHostAddress() + " " + client.getPort());
-            generalStore(client,fileFolderTxt,fileName,in,out);
+            generalStore(client,fileFolderTxt,fileName,fileLength,in,out);
             System.out.println("File received and saved to: " + fileFolderTxt);
             getOUT().println("STORE_ACK " + fileName);
             System.out.println("Storage Acknowledgement of file " + fileName + " sent to controller");
@@ -140,7 +140,7 @@ public class Dstore {
                     out.flush();
                     client.setSoTimeout(timeout);
                     try {
-                        StoreFile(client, fileFolderTxt, lines[1], in, out);
+                        StoreFile(client, fileFolderTxt, lines[1], Integer.parseInt(lines[2]), in, out);
                     } catch (Exception e) {
                         System.err.println("Timeout occurred. Closing connection");
                     }
@@ -153,8 +153,8 @@ public class Dstore {
                     System.out.println("Rebalance store request recieved");
                     out.println("ACK");
                     out.flush();
-                    client.setSoTimeout(timeout);
-                    rebalanceStore(client,fileFolderTxt, lines[1], in, out);
+                    //client.setSoTimeout(timeout);
+                    rebalanceStore(client,fileFolderTxt, lines[1], Integer.parseInt(lines[2]), in, out);
                 }
                 default -> System.err.println("Malformed client message received, message was: " + lines[0]);
             }
@@ -163,16 +163,21 @@ public class Dstore {
         }
     }
 
-    public static void generalStore(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
+    public static void generalStore(Socket client, String fileFolderTxt, String fileName, long fileLength, BufferedReader in, PrintWriter out) {
         try {
+            if(client.isClosed()) {
+                System.out.println("Socket is closed in general store");
+            }
             InputStream inputStream = client.getInputStream();
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[4096];
             int bytesRead;
             Path destinationPath = Path.of(fileFolderTxt + fileName);
             FileOutputStream fileOutputStream = new FileOutputStream(destinationPath.toString());
+            long totalBytesRead = 0;
 
-            while ((bytesRead = inputStream.read(buffer)) > 0) {
+            while (totalBytesRead < fileLength && (bytesRead = inputStream.read(buffer)) != -1) {
                 fileOutputStream.write(buffer, 0, bytesRead);
+                totalBytesRead += bytesRead;
             }
             fileOutputStream.close();
         } catch (Exception e) {
@@ -180,10 +185,10 @@ public class Dstore {
         }
     }
 
-    public static void rebalanceStore(Socket client, String fileFolderTxt, String fileName, BufferedReader in, PrintWriter out) {
+    public static void rebalanceStore(Socket client, String fileFolderTxt, String fileName, long fileLength, BufferedReader in, PrintWriter out) {
         try {
             System.out.println("Dstore Connected for rebalance storage: " + client.getInetAddress().getHostAddress() + " " + client.getPort());
-            generalStore(client, fileFolderTxt, fileName, in, out);
+            generalStore(client, fileFolderTxt, fileName, fileLength, in, out);
             System.out.println("Rebalance file received and saved to: " + fileFolderTxt);
             client.close();
         } catch (Exception e) {
