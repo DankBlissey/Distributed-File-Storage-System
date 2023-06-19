@@ -18,18 +18,13 @@ public class Controller {
     static final Object rebalanceObj = new Object();
     static List<DstoreFileList> rebalanceDstoreFiles = new ArrayList<>();
     static CountDownLatch rebalanceCd;
-    static List<FileIndex> filesWithMissingDstores = new ArrayList<>();
 
-    public static synchronized void addMissingDstores(FileIndex f) {
-        filesWithMissingDstores.add(f);
-    }
-
-    public static synchronized List<FileIndex> getMissingDstores() {
-        return filesWithMissingDstores;
-    }
-
-    public static synchronized void clearMissingDstores() {
-        filesWithMissingDstores.clear();
+    public static synchronized void removeDstoreFromFileIndex(String port) {
+        for(FileIndex f : getIndexFiles()) {
+            if(f.getDstoreAllocation().contains(port)) {
+                f.removeDstoreFromAllocation(port);
+            }
+        }
     }
 
     public static CountDownLatch getRebalanceCountDownLatch() {
@@ -121,10 +116,6 @@ public class Controller {
 
     public static synchronized DStoreI getDstoreI(String s) {
         return DstoreList.get(s);
-    }
-
-    public static synchronized String getStoreIPort(DStoreI i) {
-        return ReverseDstoreList.get(i);
     }
 
     public static synchronized String getDStoreIPort(DStoreI i ) {
@@ -386,13 +377,6 @@ public class Controller {
             boolean listed = getRebalanceCountDownLatch().await(timeout, TimeUnit.MILLISECONDS);
             if(listed) {
                 System.out.println("All list replies received");
-                /*
-                for(FileIndex f : getIndexFiles()) {
-                    if(f.getCountDownLatch().getCount() > 0) {
-                        addMissingDstores(f);
-                    }
-                }
-                 */
                 List<DstoreFileList> list = getRebalanceDstoreFiles();
                 sortRebalanceList(list);
 
@@ -472,23 +456,6 @@ public class Controller {
                     first = list.get(0);
                     last = list.get(list.size() - 1);
                 }
-                /*
-                for(DstoreFileList d : list) {
-                    for(String file : d.getFilesToAdd()) {
-                        DstoreFileList sender = getFirstDstoreWithFile(file, list, d);
-                        assert sender != null;
-                        List<String> locationsToSend;
-                        if(sender.getFilesToSend().get(file) == null) {
-                            locationsToSend = new ArrayList<>();
-                        } else {
-                            locationsToSend = new ArrayList<>(sender.getFilesToSend().get(file));
-                        }
-                        locationsToSend.add(d.getPort());
-                        sender.addFilesToSend(file, locationsToSend);
-                    }
-                }
-
-                 */
                 System.out.println("Formulating messages to send to the Dstores");
                 System.out.println(list);
                 //now we formulate the messages and send them
@@ -612,7 +579,10 @@ public class Controller {
             }
             System.err.println("Dstore at port " + getDStoreIPort(store) + "is returning null");
         } catch (Exception e) {
-            e.printStackTrace();
+            String DstorePort = getDStoreIPort(store);
+            System.err.println("Connection to Dstore: " + DstorePort + " dropped, removing Dstore from index: " + e);
+            removeDStoreList(store);
+            removeDstoreFromFileIndex(DstorePort);
         }
 
     }
