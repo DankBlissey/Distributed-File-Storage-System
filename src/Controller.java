@@ -27,6 +27,14 @@ public class Controller {
         }
     }
 
+    public static synchronized void removeDstoreFromOneFileIndex(String fileName, String port) {
+        Index.get(fileName).removeDstoreFromAllocation(port);
+    }
+
+    public static synchronized void addDstoreToFileIndex(String fileName, String port) {
+        Index.get(fileName).addDstoreToAllocation(port);
+    }
+
     public static CountDownLatch getRebalanceCountDownLatch() {
         return rebalanceCd;
     }
@@ -415,6 +423,7 @@ public class Controller {
                             String name = f.getFileName();
                             DstoreFileList d = getFirstDstoreWithoutFile(name, list);
                             assert d != null;
+                            String dPort = d.getPort();
                             DstoreFileList s = getFirstDstoreWithFile(name, list);
                             assert s != null;
                             List<String> locations;
@@ -423,11 +432,11 @@ public class Controller {
                             } else {
                                 locations = new ArrayList<>(s.getFilesToSend().get(name));
                             }
-                            locations.add(d.getPort());
+                            locations.add(dPort);
                             s.addFilesToSend(name, locations);
                             d.addFilesToAdd(name);
                             d.getFiles().add(name);
-                            getIndex().get(f.getFileName()).addDstoreToAllocation(d.getPort());
+                            addDstoreToFileIndex(f.getFileName(), dPort);
                             sortRebalanceList(list);
                         }
                     }
@@ -440,6 +449,7 @@ public class Controller {
                 while(first.getFiles().size() + 1 < last.getFiles().size()) {
                     String file = getFirstFileNotInSmallerDstore(last.getFiles(), first.getFiles());
                     transferFromList(last.getFiles(), last.getFilesToRemove(), file); // moving file from files to filesToRemove
+                    removeDstoreFromOneFileIndex(file, last.getPort());
                     List<String> locationsToSend;
                     if(last.getFilesToSend().get(file) == null) {
                         locationsToSend = new ArrayList<>();
@@ -451,6 +461,7 @@ public class Controller {
                     // adding file to files and filesToAdd
                     first.getFilesToAdd().add(file);
                     first.getFiles().add(file);
+                    addDstoreToFileIndex(file, first.getPort());
                     //sorting the rebalance list for the next iteration
                     sortRebalanceList(list);
                     first = list.get(0);
