@@ -856,6 +856,7 @@ public class Controller {
             this.filesToSend = new HashMap<>();
         }
 
+        @Override
         public String toString() {
             return "name: " + port + " files to add: " + filesToAdd + " files to remove: " + filesToRemove + "files to send: " + filesToSend;
         }
