@@ -58,7 +58,13 @@ public class Dstore {
             port = new ServerSocket(Integer.parseInt(portText));
             cport = Integer.parseInt(args[1]);
             timeout = Integer.parseInt(args[2]);
-            fileFolderTxt = args[3];
+            Path fileGiven = Path.of(args[3]);
+            if(fileGiven.isAbsolute()) {
+                fileFolderTxt = fileGiven.toString();
+            } else {
+                fileFolderTxt = Path.of(System.getProperty("user.dir"),args[3]).toString();
+            }
+            System.out.println(fileFolderTxt);
             System.out.println("Initial variables set");
 
             deleteFilesInFolder(fileFolderTxt);
@@ -171,7 +177,7 @@ public class Dstore {
             InputStream inputStream = client.getInputStream();
             byte[] buffer = new byte[4096];
             int bytesRead;
-            Path destinationPath = Path.of(fileFolderTxt + fileName);
+            Path destinationPath = Path.of(fileFolderTxt, fileName);
             FileOutputStream fileOutputStream = new FileOutputStream(destinationPath.toString());
             long totalBytesRead = 0;
 
@@ -218,7 +224,8 @@ public class Dstore {
     }
 
     public static void removeFile(String fileName) {
-        String folderPath = fileFolderTxt + fileName;
+        Path path = Path.of(fileFolderTxt,fileName);
+        String folderPath = path.toString();
         File file = new File(folderPath);
         try {
             if(file.exists()) {
@@ -233,7 +240,8 @@ public class Dstore {
     }
 
     public static void rebalanceRemove(String fileName) {
-        String folderPath = fileFolderTxt + fileName;
+        Path path = Path.of(fileFolderTxt,fileName);
+        String folderPath = path.toString();
         File file = new File(folderPath);
         try {
             if(file.exists()) {
@@ -252,7 +260,7 @@ public class Dstore {
      * @param fileName name of the file they want to retrieve
      */
     public static void loadFile(Socket client, String fileName) {
-        String path = fileFolderTxt + fileName;
+        String path = Path.of(fileFolderTxt,fileName).toString();
         if(new File(path).exists()) {
             try {
                 byte[] fileBytes = Files.readAllBytes(Paths.get(path));
@@ -345,7 +353,7 @@ public class Dstore {
                                     PrintWriter out = new PrintWriter(DstoreSo.getOutputStream());
                                     BufferedReader in = new BufferedReader(new InputStreamReader(DstoreSo.getInputStream()));
                                     String fileName = m.getKey();
-                                    String path = fileFolderTxt + fileName;
+                                    String path = Path.of(fileFolderTxt, fileName).toString();
                                     File fileSending = new File(path);
                                     long fileLength = fileSending.length();
                                     new Thread(new RebalanceThread(DstoreSo, in, out, fileName, fileLength)).start();

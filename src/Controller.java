@@ -701,7 +701,11 @@ public class Controller {
                 for(FileIndex f : getIndex().values()) {
                     f.setCountDownLatch(R);
                 }
-                rebalance();
+                if(getDstoreList().size() >= R) {
+                    rebalance();
+                } else {
+                    System.err.println("Not enough Dstores connected to reabalance");
+                }
             }
         }
     }
