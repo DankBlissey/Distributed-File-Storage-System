@@ -54,7 +54,7 @@ public class Controller {
     }
 
     public static synchronized void wipeRebalanceDstoreFiles() {
-        rebalanceDstoreFiles = new ArrayList<>();
+        rebalanceDstoreFiles.clear();
     }
 
     public static synchronized List<DstoreFileList> getRebalanceDstoreFiles() {
@@ -387,8 +387,9 @@ public class Controller {
 
     public static void rebalance() {
         synchronized (rebalanceStart) {
+            //this means that rebalance will hold the start lock for its duration meaning no further requests will be run until rebalance has completed
             synchronized (rebalanceLock) {
-
+                //This will mean that rebalance will attempt to get the lock meaning it will not start untill all current store and remove requests have been complete
             }
             System.out.println("rebalance called, caling List for each Dstore");
             System.out.println("Number of Dstores: " + getDstoreList().size());
@@ -509,7 +510,7 @@ public class Controller {
                         out.flush();
                     }
                     System.out.println("Messages sent");
-                    getRebalanceDstoreFiles().clear();
+                    wipeRebalanceDstoreFiles();
                 } else {
                     System.err.println("Not all list replies received, countDownLatch at : " + getRebalanceCountDownLatch().getCount());
                 }
@@ -704,7 +705,7 @@ public class Controller {
                 if(getDstoreList().size() >= R) {
                     rebalance();
                 } else {
-                    System.err.println("Not enough Dstores connected to reabalance");
+                    System.err.println("Not enough Dstores connected to rebalance");
                 }
             }
         }

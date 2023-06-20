@@ -298,14 +298,13 @@ public class Dstore {
                         File location = new File(fileFolderTxt);
                         File[] fileList = location.listFiles();
                         synchronized (Dstore.class) {
-                            getOUT().print("LIST");
-                            getOUT().flush();
+                            StringBuilder print = new StringBuilder("LIST");
                             if(fileList != null) {
                                 for(File x : fileList) {
-                                    getOUT().print(" " + x.getName());
+                                    print.append(" ").append(x.getName());
                                 }
                             }
-                            getOUT().println("");
+                            getOUT().println(print);
                             getOUT().flush();
                         }
                     }
@@ -415,7 +414,8 @@ public class Dstore {
                 out.println("REBALANCE_STORE " + fileName + " " + fileSize);
                 out.flush();
                 byte[] fileBytes;
-                String path = fileFolderTxt + fileName;
+                Path path1 = Path.of(fileFolderTxt,fileName);
+                String path = path1.toString();
                 fileBytes = Files.readAllBytes(Paths.get(path));
                 Dstore.setSoTimeout(timeout);
                 System.out.println("Reading acknowledgement line");
